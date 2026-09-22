@@ -4,6 +4,8 @@ import { reseed } from "../random";
 import { UI } from "./helpers/ui";
 import { Excalidraw } from "../index";
 import { expect } from "vitest";
+import { DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE } from "../constants";
+import { getLineHeight } from "../fonts";
 
 unmountComponent();
 
@@ -50,7 +52,12 @@ test("unselected bound arrows update when rotating their target elements", async
     height: 80,
   });
   const text = UI.createElement("text", {
-    position: 220,
+    // tutorgo: новый текст встаёт серединой первой строки в курсор, а не
+    // верхним левым углом (см. App.tsx), поэтому клик ниже на полстроки —
+    // сам текст оказывается там же, где в апстриме, и дальнейшие координаты
+    // привязанной стрелки не разъезжаются.
+    x: 220,
+    y: 220 + (DEFAULT_FONT_SIZE * getLineHeight(DEFAULT_FONT_FAMILY)) / 2,
   });
   await UI.editText(text, "test");
   const textArrow = UI.createElement("arrow", {

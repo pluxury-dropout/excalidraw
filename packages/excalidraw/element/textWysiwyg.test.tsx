@@ -15,7 +15,14 @@ import {
 } from "../tests/test-utils";
 import { queryByText } from "@testing-library/react";
 
-import { FONT_FAMILY, TEXT_ALIGN, VERTICAL_ALIGN } from "../constants";
+import {
+  DEFAULT_FONT_FAMILY,
+  DEFAULT_FONT_SIZE,
+  FONT_FAMILY,
+  TEXT_ALIGN,
+  VERTICAL_ALIGN,
+} from "../constants";
+import { getLineHeight } from "../fonts";
 import type {
   ExcalidrawTextElement,
   ExcalidrawTextElementWithContainer,
@@ -530,17 +537,18 @@ describe("textWysiwyg", () => {
         code: CODES.MINUS,
         ctrlKey: true,
       });
-      expect(h.state.zoom.value).toBe(0.9);
+      // tutorgo: шаг зума мультипликативный (zoom / 1.1), а не zoom − 0.1
+      expect(h.state.zoom.value).toBe(0.909091);
       fireEvent.keyDown(textarea, {
         code: CODES.NUM_SUBTRACT,
         ctrlKey: true,
       });
-      expect(h.state.zoom.value).toBe(0.8);
+      expect(h.state.zoom.value).toBe(0.826446);
       fireEvent.keyDown(textarea, {
         code: CODES.NUM_ADD,
         ctrlKey: true,
       });
-      expect(h.state.zoom.value).toBe(0.9);
+      expect(h.state.zoom.value).toBe(0.909091);
       fireEvent.keyDown(textarea, {
         code: CODES.EQUAL,
         ctrlKey: true,
@@ -1281,7 +1289,7 @@ describe("textWysiwyg", () => {
       ).toEqual(FONT_FAMILY["Comic Shanns"]);
       expect(getOriginalContainerHeightFromCache(rectangle.id)).toBe(75);
 
-      fireEvent.click(screen.getByTitle(/Very large/i));
+      UI.setFontSize(36);
       expect(
         (h.elements[1] as ExcalidrawTextElementWithContainer).fontSize,
       ).toEqual(36);
@@ -1439,7 +1447,13 @@ describe("textWysiwyg", () => {
 
     it("should wrap text in a container when wrap text in container triggered from context menu", async () => {
       UI.clickTool("text");
-      mouse.clickAt(20, 30);
+      // tutorgo: клик задаёт середину первой строки, а не верхний край (см.
+      // App.tsx), поэтому кликаем на полстроки ниже — текст встаёт в y = 30,
+      // как в апстриме, и координаты контейнера в ожиданиях не меняются.
+      mouse.clickAt(
+        20,
+        30 + (DEFAULT_FONT_SIZE * getLineHeight(DEFAULT_FONT_FAMILY)) / 2,
+      );
       const editor = await getTextEditor(textEditorSelector, true);
 
       updateTextEditor(

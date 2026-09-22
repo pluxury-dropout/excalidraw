@@ -84,7 +84,19 @@ export const getElementsWithinSelection = (
       selectionX1 <= elementX2 &&
       selectionX2 >= elementX1 &&
       selectionY1 <= elementY2 &&
-      selectionY2 >= elementY1
+      selectionY2 >= elementY1 &&
+      // ...но элемент, который сам объемлет рамку, не берём: его не обводили,
+      // внутри него обводили что-то другое. Иначе мелкие объекты поверх
+      // большой картинки нельзя выделить без неё, а обычный клик (рамка
+      // нулевого размера) выделял бы фигуру, внутрь которой попал, хотя
+      // прозрачную Excalidraw берёт только за контур. Так же ведёт себя
+      // marquee в Figma.
+      !(
+        elementX1 <= selectionX1 &&
+        elementY1 <= selectionY1 &&
+        elementX2 >= selectionX2 &&
+        elementY2 >= selectionY2
+      )
     );
   });
 

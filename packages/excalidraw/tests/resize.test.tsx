@@ -542,12 +542,14 @@ describe("text element", () => {
   it("resizes", async () => {
     const text = UI.createElement("text");
     await UI.editText(text, "hello\nworld");
-    const { width, height, fontSize } = text;
+    // tutorgo: новый текст встаёт серединой первой строки в курсор, поэтому
+    // исходный угол — не (0, 0); тянем за «se», и угол не должен сдвинуться.
+    const { x: prevX, y: prevY, width, height, fontSize } = text;
     const scale = 40 / height + 1;
     UI.resize(text, "se", [30, 40]);
 
-    expect(text.x).toBeCloseTo(0);
-    expect(text.y).toBeCloseTo(0);
+    expect(text.x).toBeCloseTo(prevX);
+    expect(text.y).toBeCloseTo(prevY);
     expect(text.width).toBeCloseTo(width * scale);
     expect(text.height).toBeCloseTo(height * scale);
     expect(text.angle).toBeCloseTo(0);
@@ -1061,7 +1063,7 @@ describe("multiple selection", () => {
     const topArrowLabel = await UI.editText(topArrow.get(), "lorem ipsum");
 
     UI.clickTool("text");
-    UI.clickByTitle("Large");
+    UI.setFontSize(28);
     const bottomArrow = UI.createElement("arrow", {
       x: 0,
       y: 80,
@@ -1132,12 +1134,17 @@ describe("multiple selection", () => {
     await UI.editText(topText, "lorem ipsum");
 
     UI.clickTool("text");
-    UI.clickByTitle("Large");
+    UI.setFontSize(28);
     const bottomText = UI.createElement("text", { position: 40 });
     await UI.editText(bottomText, "dolor\nsit amet");
 
-    const selectionWidth = 40 + bottomText.width;
-    const selectionHeight = 40 + bottomText.height;
+    // tutorgo: y обоих текстов сдвинут на полстроки вверх относительно клика
+    // (см. App.tsx), поэтому границы селекции считаем по факту, а не по
+    // координатам кликов. Формулы ниже — те же, что в апстриме.
+    const { x: topX, y: topY } = topText;
+    const { x: bottomX, y: bottomY } = bottomText;
+    const selectionWidth = bottomX + bottomText.width - topX;
+    const selectionHeight = bottomY + bottomText.height - topY;
     const move = [30, -40] as [number, number];
     const scale = Math.max(
       1 + move[0] / selectionWidth,
@@ -1146,13 +1153,15 @@ describe("multiple selection", () => {
 
     UI.resize([topText, bottomText], "ne", move, { shift: true });
 
-    expect(topText.x).toBeCloseTo(0);
-    expect(topText.y).toBeCloseTo(-selectionHeight * (scale - 1));
+    expect(topText.x).toBeCloseTo(topX);
+    expect(topText.y).toBeCloseTo(topY - selectionHeight * (scale - 1));
     expect(topText.fontSize).toBeCloseTo(20 * scale);
     expect(topText.angle).toEqual(0);
 
-    expect(bottomText.x).toBeCloseTo(40 * scale);
-    expect(bottomText.y).toBeCloseTo(40 - (selectionHeight - 40) * (scale - 1));
+    expect(bottomText.x).toBeCloseTo(topX + (bottomX - topX) * scale);
+    expect(bottomText.y).toBeCloseTo(
+      bottomY - (topY + selectionHeight - bottomY) * (scale - 1),
+    );
     expect(bottomText.fontSize).toBeCloseTo(28 * scale);
     expect(bottomText.angle).toEqual(0);
   });

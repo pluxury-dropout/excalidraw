@@ -437,6 +437,17 @@ export class UI {
   };
 
   /**
+   * tutorgo: размер шрифта задаётся числовым полем, а не кнопками S/M/L/XL,
+   * поэтому вместо clickByTitle("Large") — ввод значения. Применяется по blur,
+   * как в самом контроле.
+   */
+  static setFontSize = (fontSize: number) => {
+    const input = screen.getByTestId("fontSize-input");
+    fireEvent.change(input, { target: { value: String(fontSize) } });
+    fireEvent.blur(input);
+  };
+
+  /**
    * Creates an Excalidraw element, and returns a proxy that wraps it so that
    * accessing props will return the latest ones from the object existing in
    * the app's elements array. This is because across the app lifecycle we tend
