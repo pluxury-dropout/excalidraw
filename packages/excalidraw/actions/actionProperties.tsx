@@ -9,6 +9,7 @@ import {
 } from "../colors";
 import { trackEvent } from "../analytics";
 import { ButtonIconSelect } from "../components/ButtonIconSelect";
+import { FontSizeInput } from "../components/FontSizeInput";
 import { ColorPicker } from "../components/ColorPicker/ColorPicker";
 import { IconPicker } from "../components/IconPicker";
 import { FontPicker } from "../components/FontPicker/FontPicker";
@@ -35,10 +36,6 @@ import {
   StrokeWidthBaseIcon,
   StrokeWidthBoldIcon,
   StrokeWidthExtraBoldIcon,
-  FontSizeSmallIcon,
-  FontSizeMediumIcon,
-  FontSizeLargeIcon,
-  FontSizeExtraLargeIcon,
   EdgeSharpIcon,
   EdgeRoundIcon,
   TextAlignLeftIcon,
@@ -647,37 +644,13 @@ export const actionChangeFontSize = register({
   perform: (elements, appState, value, app) => {
     return changeFontSize(elements, appState, app, () => value, value);
   },
+  // tutorgo: вместо четырёх пресетов S/M/L/XL — числовое поле. Значение
+  // по-прежнему уходит в perform выше, поэтому вся логика применения размера
+  // осталась апстримовой.
   PanelComponent: ({ elements, appState, updateData, app }) => (
     <fieldset>
       <legend>{t("labels.fontSize")}</legend>
-      <ButtonIconSelect
-        group="font-size"
-        options={[
-          {
-            value: 16,
-            text: t("labels.small"),
-            icon: FontSizeSmallIcon,
-            testId: "fontSize-small",
-          },
-          {
-            value: 20,
-            text: t("labels.medium"),
-            icon: FontSizeMediumIcon,
-            testId: "fontSize-medium",
-          },
-          {
-            value: 28,
-            text: t("labels.large"),
-            icon: FontSizeLargeIcon,
-            testId: "fontSize-large",
-          },
-          {
-            value: 36,
-            text: t("labels.veryLarge"),
-            icon: FontSizeExtraLargeIcon,
-            testId: "fontSize-veryLarge",
-          },
-        ]}
+      <FontSizeInput
         value={getFormValue(
           elements,
           appState,

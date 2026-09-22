@@ -69,7 +69,27 @@ describe("appState", () => {
     UI.clickTool("text");
 
     expect(h.state.currentItemFontSize).toBe(30);
-    fireEvent.click(queryByTestId(container, "fontSize-small")!);
+
+    // tutorgo: числовое поле вместо пресетов S/M/L/XL. Значение применяется по
+    // blur, а не на каждый keystroke.
+    const input = queryByTestId(container, "fontSize-input") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "16" } });
+    fireEvent.blur(input);
+    expect(h.state.currentItemFontSize).toBe(16);
+
+    // ниже MIN_FONT_SIZE не пускаем
+    fireEvent.change(input, { target: { value: "1" } });
+    fireEvent.blur(input);
+    expect(h.state.currentItemFontSize).toBe(4);
+
+    // мусор в поле откатывается к текущему значению
+    fireEvent.change(input, { target: { value: "abc" } });
+    fireEvent.blur(input);
+    expect(h.state.currentItemFontSize).toBe(4);
+    expect(input.value).toBe("4");
+
+    fireEvent.change(input, { target: { value: "16" } });
+    fireEvent.blur(input);
     expect(h.state.currentItemFontSize).toBe(16);
 
     const mouse = new Pointer("mouse");

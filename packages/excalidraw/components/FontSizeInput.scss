@@ -1,0 +1,68 @@
+// tutorgo: стиль числового размера шрифта. Рамка и радиус повторяют
+// .drag-input из панели Stats, чтобы контрол не выбивался из темы.
+.excalidraw {
+  .tutorgo-font-size {
+    display: flex;
+    align-items: stretch;
+    width: 100%;
+    height: 2rem;
+    border: 1px solid var(--default-border-color);
+    border-radius: var(--border-radius-md);
+    box-sizing: border-box;
+    overflow: hidden;
+
+    &:focus-within {
+      box-shadow: 0 0 0 1px var(--color-primary-darkest);
+    }
+  }
+
+  // Свои кнопки вместо нативных спиннеров: те микроскопические и на тач-экране
+  // (урок со стилуса или с планшета) в них не попасть.
+  .tutorgo-font-size__step {
+    flex: 0 0 2rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--popup-text-color);
+    font-size: 1rem;
+    line-height: 1;
+    cursor: pointer;
+
+    &:hover {
+      background: var(--button-hover-bg, var(--island-bg-color));
+    }
+
+    &:active {
+      background: var(--color-primary-light);
+    }
+  }
+
+  .tutorgo-font-size__input {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    outline: none;
+    background: transparent;
+    color: var(--text-primary-color);
+    font-family: inherit;
+    font-size: 0.875rem;
+    letter-spacing: 0.4px;
+    text-align: center;
+    appearance: textfield;
+
+    &::-webkit-outer-spin-button,
+    &::-webkit-inner-spin-button {
+      appearance: none;
+      margin: 0;
+    }
+
+    &:focus-visible {
+      box-shadow: none;
+    }
+  }
+}
