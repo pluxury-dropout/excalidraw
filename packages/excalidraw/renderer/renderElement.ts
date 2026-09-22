@@ -38,7 +38,7 @@ import type {
   PendingExcalidrawElements,
 } from "../types";
 import { getDefaultAppState } from "../appState";
-import { PEN_SCALE, PEN_THINNING } from "../tutorgo";
+import { PEN_SCALE, PEN_SPEED_SCALE, PEN_THINNING } from "../tutorgo";
 import {
   BOUND_TEXT_PADDING,
   DEFAULT_REDUCED_GLOBAL_ALPHA,
@@ -48,7 +48,7 @@ import {
   THEME,
 } from "../constants";
 import type { StrokeOptions } from "perfect-freehand";
-import { getStroke } from "perfect-freehand";
+import { getStrokeOutlinePoints, getStrokePoints } from "perfect-freehand";
 import {
   getBoundTextElement,
   getContainerCoords,
@@ -1024,11 +1024,13 @@ export function getFreeDrawSvgPath(element: ExcalidrawFreeDrawElement) {
     ? element.points.map(([x, y], i) => [x, y, element.pressures[i]])
     : [[0, 0, 0.5]];
 
+  // tutorgo: толщина и амплитуда нажима — см. ../tutorgo.ts
+  const size = element.strokeWidth * PEN_SCALE;
+
   // Consider changing the options for simulated pressure vs real pressure
   const options: StrokeOptions = {
     simulatePressure: element.simulatePressure,
-    // tutorgo: толщина и амплитуда нажима — см. ../tutorgo.ts
-    size: element.strokeWidth * PEN_SCALE,
+    size,
     thinning: PEN_THINNING,
     smoothing: 0.5,
     streamline: 0.5,
@@ -1036,7 +1038,28 @@ export function getFreeDrawSvgPath(element: ExcalidrawFreeDrawElement) {
     last: !!element.lastCommittedPoint, // LastCommittedPoint is added on pointerup
   };
 
-  return getSvgPathFromStroke(getStroke(inputPoints as number[][], options));
+  // tutorgo: getStroke — это getStrokeOutlinePoints(getStrokePoints(...)), обе
+  // половины публичны, поэтому вклиниваемся между ними. Симулированный нажим
+  // внутри perfect-freehand считается как min(1, distance / size), то есть
+  // порогом скорости служит толщина пера; масштабируя distance на
+  // size / PEN_SPEED_SCALE, получаем min(1, distance / PEN_SPEED_SCALE) —
+  // профиль «скорость → толщина» перестаёт зависеть от градации тулбара.
+  //
+  // Поле distance больше нигде в getStrokeOutlinePoints не используется (дальше
+  // идут runningLength для taper, векторы и радиус), так что правка бьёт ровно
+  // в симуляцию нажима. Прежде это делалось патчем по бандлу самой
+  // perfect-freehand; вариант выше численно ему тождествен (расхождение 1e-14)
+  // и не трогает чужой пакет.
+  const strokePoints = getStrokePoints(inputPoints as number[][], options);
+
+  if (element.simulatePressure) {
+    const speedScale = size / PEN_SPEED_SCALE;
+    for (const strokePoint of strokePoints) {
+      strokePoint.distance *= speedScale;
+    }
+  }
+
+  return getSvgPathFromStroke(getStrokeOutlinePoints(strokePoints, options));
 }
 
 function med(A: number[], B: number[]) {
