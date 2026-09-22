@@ -5279,7 +5279,11 @@ class App extends React.Component<AppProps, AppState> {
             : sceneX,
           y: parentCenterPosition
             ? parentCenterPosition.elementCenterY
-            : sceneY,
+            : // tutorgo: новый текст апстрим кладёт верхним левым углом в
+              // курсор, и поле «вываливается» вниз из-под указателя. Сдвигаем
+              // на полстроки вверх — на курсоре оказывается середина первой
+              // строки. Ветка снапа к центру контейнера не трогается.
+              sceneY - (fontSize * lineHeight) / 2,
           strokeColor: this.state.currentItemStrokeColor,
           backgroundColor: this.state.currentItemBackgroundColor,
           fillStyle: this.state.currentItemFillStyle,
@@ -10957,13 +10961,17 @@ class App extends React.Component<AppProps, AppState> {
           delta = MAX_STEP * sign;
         }
 
-        let newZoom = this.state.zoom.value - delta / 100;
-        // increase zoom steps the more zoomed-in we are (applies to >100% only)
-        newZoom +=
-          Math.log10(Math.max(1, this.state.zoom.value)) *
-          -sign *
-          // reduced amplification for small deltas (small movements on a trackpad)
-          Math.min(1, absDelta / 20);
+        // tutorgo: зум у Excalidraw аддитивный (zoom − delta/100), поэтому шаг
+        // в абсолютных единицах: на 100% он ощущается как 10%, а на 10% — как
+        // 100%, и последний шаг вниз падает прямо в MIN_ZOOM. Делаем шаг
+        // мультипликативным — тогда «скорость» одинакова на любом уровне.
+        // exp(−delta/100) при zoom ≈ 1 совпадает с прежней формулой с точностью
+        // до второго порядка, так что привычное поведение около 100%
+        // сохраняется. Заодно убрана амплификация log10(max(1, zoom)): она
+        // существовала ровно чтобы компенсировать аддитивность при сильном
+        // приближении, а поверх умножения снова делает скорость неравномерной.
+        // Пинч не трогаем — он и так мультипликативный (initialScale × scale).
+        const newZoom = this.state.zoom.value * Math.exp(-delta / 100);
 
         this.translateCanvas((state) => ({
           ...getStateForZoom(

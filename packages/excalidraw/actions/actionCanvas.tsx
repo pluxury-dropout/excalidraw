@@ -134,7 +134,8 @@ export const actionZoomIn = register({
           {
             viewportX: appState.width / 2 + appState.offsetLeft,
             viewportY: appState.height / 2 + appState.offsetTop,
-            nextZoom: getNormalizedZoom(appState.zoom.value + ZOOM_STEP),
+            // tutorgo: шаг мультипликативный, а не аддитивный — см. App.tsx
+            nextZoom: getNormalizedZoom(appState.zoom.value * (1 + ZOOM_STEP)),
           },
           appState,
         ),
@@ -175,7 +176,8 @@ export const actionZoomOut = register({
           {
             viewportX: appState.width / 2 + appState.offsetLeft,
             viewportY: appState.height / 2 + appState.offsetTop,
-            nextZoom: getNormalizedZoom(appState.zoom.value - ZOOM_STEP),
+            // tutorgo: шаг мультипликативный, а не аддитивный — см. App.tsx
+            nextZoom: getNormalizedZoom(appState.zoom.value / (1 + ZOOM_STEP)),
           },
           appState,
         ),

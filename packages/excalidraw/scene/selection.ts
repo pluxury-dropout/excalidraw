@@ -74,10 +74,17 @@ export const getElementsWithinSelection = (
       element.locked === false &&
       element.type !== "selection" &&
       !isBoundToContainer(element) &&
-      selectionX1 <= elementX1 &&
-      selectionY1 <= elementY1 &&
-      selectionX2 >= elementX2 &&
-      selectionY2 >= elementY2
+      // tutorgo: containment → intersection. В апстриме рамка забирает только
+      // элементы, чей bbox лежит в ней ЦЕЛИКОМ; в Miro/Figma достаточно задеть
+      // краем — иначе, чтобы взять длинную линию или крупную картинку,
+      // приходится отдалять доску и обводить её всю. Два AABB пересекаются,
+      // когда sel.x1 ≤ el.x2 ∧ sel.x2 ≥ el.x1 и то же по Y. Сравнение по bbox,
+      // а не по геометрии штриха: хит-тест выделенной группы у Excalidraw
+      // тоже работает по общему bbox, так что рамка ведёт себя согласованно.
+      selectionX1 <= elementX2 &&
+      selectionX2 >= elementX1 &&
+      selectionY1 <= elementY2 &&
+      selectionY2 >= elementY1
     );
   });
 
