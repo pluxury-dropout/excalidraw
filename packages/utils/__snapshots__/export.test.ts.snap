@@ -102,6 +102,7 @@ exports[`exportToSvg > with default arguments 1`] = `
   "suggestedBindings": [],
   "theme": "light",
   "toast": null,
+  "tutorgoBackground": null,
   "userToFollow": null,
   "viewBackgroundColor": "#ffffff",
   "viewModeEnabled": false,

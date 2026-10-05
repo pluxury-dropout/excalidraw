@@ -110,6 +110,8 @@ const getRelevantAppStateProps = (
   editingGroupId: appState.editingGroupId,
   currentHoveredFontFamily: appState.currentHoveredFontFamily,
   croppingElementId: appState.croppingElementId,
+  // tutorgo: иначе memo не перерисует холст при смене фона
+  tutorgoBackground: appState.tutorgoBackground,
 });
 
 const areEqual = (

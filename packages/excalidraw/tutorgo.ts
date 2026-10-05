@@ -34,3 +34,28 @@
 export const PEN_SCALE = 1;
 export const PEN_THINNING = 0.9;
 export const PEN_SPEED_SCALE = 10;
+
+/**
+ * Фон доски (спека TutorGo 2026-10-05). Всё «на глаз»: узор должен быть виден,
+ * но не спорить с чернилами. Шаг — в единицах сцены (масштабируется с зумом),
+ * толщины и радиус точек — в экранных px (не толстеют при приближении).
+ * Цвет под узором ставит хост через viewBackgroundColor.
+ */
+export const BG_STEP = 24;
+/** Линейка: под строку текста по умолчанию (Nunito 20 × lineHeight 1.25 = 25). */
+export const BG_LINED_STEP = 25;
+export const BG_DOT_COLOR = "#D6D6DB";
+export const BG_DOT_RADIUS_PX = 0.75;
+export const BG_LINE_COLOR = "#ECECEF";
+export const BG_LINE_BOLD_COLOR = "#DCDCE1";
+export const BG_LINE_BOLD_EVERY = 5;
+/** Шаг на экране, ниже которого узор начинает гаснуть и где пропадает совсем. */
+export const BG_FADE_FROM_PX = 14;
+export const BG_FADE_TO_PX = 8;
+
+/** Видимость узора от шага на экране (шаг × zoom): 1 → 0 линейно. */
+export const patternOpacity = (stepPx: number) =>
+  Math.min(
+    1,
+    Math.max(0, (stepPx - BG_FADE_TO_PX) / (BG_FADE_FROM_PX - BG_FADE_TO_PX)),
+  );

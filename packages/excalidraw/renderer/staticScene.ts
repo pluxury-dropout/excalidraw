@@ -33,6 +33,8 @@ import { throttleRAF } from "../utils";
 import { getBoundTextElement } from "../element/textElement";
 import { isElementLink } from "../element/elementLink";
 
+import { strokeTutorgoBackground } from "./tutorgoBackground";
+
 const GridLineColor = {
   Bold: "#dddddd",
   Regular: "#e5e5e5",
@@ -238,6 +240,19 @@ const _renderStaticScene = ({
 
   // Apply zoom
   context.scale(appState.zoom.value, appState.zoom.value);
+
+  // tutorgo: узор фона — тем же проходом, что и элементы, чтобы не плыл при пане.
+  if (appState.tutorgoBackground && !isExporting) {
+    strokeTutorgoBackground(
+      context,
+      appState.tutorgoBackground,
+      appState.scrollX,
+      appState.scrollY,
+      appState.zoom,
+      normalizedWidth / appState.zoom.value,
+      normalizedHeight / appState.zoom.value,
+    );
+  }
 
   // Grid
   if (renderGrid) {

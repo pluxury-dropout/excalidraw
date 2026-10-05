@@ -187,6 +187,8 @@ export type StaticCanvasAppState = Readonly<
     hoveredElementIds: AppState["hoveredElementIds"];
     // Cropping
     croppingElementId: AppState["croppingElementId"];
+    // tutorgo: необязательно — экспорт собирает этот тип сам и узор не рисует.
+    tutorgoBackground?: AppState["tutorgoBackground"];
   }
 >;
 
@@ -361,6 +363,8 @@ export interface AppState {
   gridSize: number;
   gridStep: number;
   gridModeEnabled: boolean;
+  /** tutorgo: узор фона доски; null — как в апстриме (узора нет). */
+  tutorgoBackground: "dots" | "grid" | "lined" | "plain" | null;
   viewModeEnabled: boolean;
 
   /** top-most selected groups (i.e. does not include nested groups) */
