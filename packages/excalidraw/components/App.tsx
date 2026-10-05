@@ -4256,9 +4256,12 @@ class App extends React.Component<AppProps, AppState> {
       }
 
       if (event.key === KEYS.QUESTION_MARK) {
-        this.setState({
-          openDialog: { name: "help" },
-        });
+        // tutorgo: справку можно выключить через UIOptions.tools.help
+        if (this.props.UIOptions.tools?.help !== false) {
+          this.setState({
+            openDialog: { name: "help" },
+          });
+        }
         return;
       } else if (
         event.key.toLowerCase() === KEYS.E &&
@@ -4468,7 +4471,11 @@ class App extends React.Component<AppProps, AppState> {
           }
           this.setActiveTool({ type: shape });
           event.stopPropagation();
-        } else if (event.key === KEYS.Q) {
+        } else if (
+          event.key === KEYS.Q &&
+          // tutorgo
+          this.props.UIOptions.tools?.lock !== false
+        ) {
           this.toggleLock("keyboard");
           event.stopPropagation();
         }

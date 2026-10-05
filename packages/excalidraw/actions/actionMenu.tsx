@@ -77,5 +77,8 @@ export const actionShortcuts = register({
       captureUpdate: CaptureUpdateAction.EVENTUALLY,
     };
   },
-  keyTest: (event) => event.key === KEYS.QUESTION_MARK,
+  keyTest: (event, appState, elements, app) =>
+    // tutorgo
+    app.props.UIOptions.tools?.help !== false &&
+    event.key === KEYS.QUESTION_MARK,
 });

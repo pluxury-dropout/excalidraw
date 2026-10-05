@@ -103,12 +103,15 @@ export const MobileMenu = ({
                     isMobile
                     penDetected={appState.penDetected}
                   />
-                  <LockButton
-                    checked={appState.activeTool.locked}
-                    onChange={onLockToggle}
-                    title={t("toolBar.lock")}
-                    isMobile
-                  />
+                  {/* tutorgo */}
+                  {UIOptions.tools?.lock !== false && (
+                    <LockButton
+                      checked={appState.activeTool.locked}
+                      onChange={onLockToggle}
+                      title={t("toolBar.lock")}
+                      isMobile
+                    />
+                  )}
                   <HandButton
                     checked={isHandToolActive(appState)}
                     onChange={() => onHandToolToggle()}

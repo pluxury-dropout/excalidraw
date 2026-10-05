@@ -359,23 +359,28 @@ export const ShapesSwitcher = ({
           onSelect={() => setIsExtraToolsMenuOpen(false)}
           className="App-toolbar__extra-tools-dropdown"
         >
-          <DropdownMenu.Item
-            onSelect={() => app.setActiveTool({ type: "frame" })}
-            icon={frameToolIcon}
-            shortcut={KEYS.F.toLocaleUpperCase()}
-            data-testid="toolbar-frame"
-            selected={frameToolSelected}
-          >
-            {t("toolBar.frame")}
-          </DropdownMenu.Item>
-          <DropdownMenu.Item
-            onSelect={() => app.setActiveTool({ type: "embeddable" })}
-            icon={EmbedIcon}
-            data-testid="toolbar-embeddable"
-            selected={embeddableToolSelected}
-          >
-            {t("toolBar.embeddable")}
-          </DropdownMenu.Item>
+          {/* tutorgo: пункты гасятся через UIOptions.tools */}
+          {UIOptions.tools?.frame !== false && (
+            <DropdownMenu.Item
+              onSelect={() => app.setActiveTool({ type: "frame" })}
+              icon={frameToolIcon}
+              shortcut={KEYS.F.toLocaleUpperCase()}
+              data-testid="toolbar-frame"
+              selected={frameToolSelected}
+            >
+              {t("toolBar.frame")}
+            </DropdownMenu.Item>
+          )}
+          {UIOptions.tools?.embeddable !== false && (
+            <DropdownMenu.Item
+              onSelect={() => app.setActiveTool({ type: "embeddable" })}
+              icon={EmbedIcon}
+              data-testid="toolbar-embeddable"
+              selected={embeddableToolSelected}
+            >
+              {t("toolBar.embeddable")}
+            </DropdownMenu.Item>
+          )}
           <DropdownMenu.Item
             onSelect={() => app.setActiveTool({ type: "laser" })}
             icon={laserPointerToolIcon}
@@ -385,27 +390,37 @@ export const ShapesSwitcher = ({
           >
             {t("toolBar.laser")}
           </DropdownMenu.Item>
-          <div style={{ margin: "6px 0", fontSize: 14, fontWeight: 600 }}>
-            Generate
-          </div>
-          {app.props.aiEnabled !== false && <TTDDialogTriggerTunnel.Out />}
-          <DropdownMenu.Item
-            onSelect={() => app.setOpenDialog({ name: "ttd", tab: "mermaid" })}
-            icon={mermaidLogoIcon}
-            data-testid="toolbar-embeddable"
-          >
-            {t("toolBar.mermaidToExcalidraw")}
-          </DropdownMenu.Item>
-          {app.props.aiEnabled !== false && app.plugins.diagramToCode && (
+          {/* tutorgo: заголовок «Generate» — только если под ним что-то есть */}
+          {(UIOptions.tools?.mermaid !== false ||
+            app.props.aiEnabled !== false) && (
             <>
-              <DropdownMenu.Item
-                onSelect={() => app.onMagicframeToolSelect()}
-                icon={MagicIcon}
-                data-testid="toolbar-magicframe"
-              >
-                {t("toolBar.magicframe")}
-                <DropdownMenu.Item.Badge>AI</DropdownMenu.Item.Badge>
-              </DropdownMenu.Item>
+              <div style={{ margin: "6px 0", fontSize: 14, fontWeight: 600 }}>
+                Generate
+              </div>
+              {app.props.aiEnabled !== false && <TTDDialogTriggerTunnel.Out />}
+              {UIOptions.tools?.mermaid !== false && (
+                <DropdownMenu.Item
+                  onSelect={() =>
+                    app.setOpenDialog({ name: "ttd", tab: "mermaid" })
+                  }
+                  icon={mermaidLogoIcon}
+                  data-testid="toolbar-embeddable"
+                >
+                  {t("toolBar.mermaidToExcalidraw")}
+                </DropdownMenu.Item>
+              )}
+              {app.props.aiEnabled !== false && app.plugins.diagramToCode && (
+                <>
+                  <DropdownMenu.Item
+                    onSelect={() => app.onMagicframeToolSelect()}
+                    icon={MagicIcon}
+                    data-testid="toolbar-magicframe"
+                  >
+                    {t("toolBar.magicframe")}
+                    <DropdownMenu.Item.Badge>AI</DropdownMenu.Item.Badge>
+                  </DropdownMenu.Item>
+                </>
+              )}
             </>
           )}
         </DropdownMenu.Content>

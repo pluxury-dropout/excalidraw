@@ -142,7 +142,9 @@ export const actionSetFrameAsActiveTool = register({
       captureUpdate: CaptureUpdateAction.EVENTUALLY,
     };
   },
-  keyTest: (event) =>
+  keyTest: (event, appState, elements, app) =>
+    // tutorgo
+    app.props.UIOptions.tools?.frame !== false &&
     !event[KEYS.CTRL_OR_CMD] &&
     !event.shiftKey &&
     !event.altKey &&

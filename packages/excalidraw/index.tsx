@@ -65,6 +65,8 @@ const ExcalidrawBase = (props: ExcalidrawProps) => {
       ...canvasActions,
     },
     tools: {
+      // tutorgo: пропускаем и свои ключи, не только image.
+      ...props.UIOptions?.tools,
       image: props.UIOptions?.tools?.image ?? true,
     },
   };

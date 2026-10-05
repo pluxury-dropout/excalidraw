@@ -626,6 +626,14 @@ export type UIOptions = Partial<{
   canvasActions: CanvasActions;
   tools: {
     image: boolean;
+    // tutorgo: false прячет кнопку и гасит хоткей. Не заданы — показано.
+    diamond?: boolean;
+    line?: boolean;
+    frame?: boolean;
+    embeddable?: boolean;
+    mermaid?: boolean;
+    lock?: boolean;
+    help?: boolean;
   };
   /** @deprecated does nothing. Will be removed in 0.15 */
   welcomeScreen?: boolean;
