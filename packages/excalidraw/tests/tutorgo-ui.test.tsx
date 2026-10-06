@@ -4,6 +4,9 @@ import React from "react";
 import { KEYS } from "../keys";
 import { Excalidraw } from "../index";
 
+import { actionWrapSelectionInFrame } from "../actions/actionFrame";
+
+import { API } from "./helpers/api";
 import { Keyboard } from "./helpers/ui";
 import { render, queryByTestId } from "./test-utils";
 
@@ -44,6 +47,18 @@ describe("tutorgo: UIOptions.tools", () => {
     expect(window.h.state.activeTool.locked).toBe(false);
     Keyboard.keyPress(KEYS.QUESTION_MARK);
     expect(window.h.state.openDialog).toBe(null);
+  });
+
+  it("«обернуть в фрейм» из контекстного меню выключен вместе с фреймом", async () => {
+    await render(
+      <Excalidraw UIOptions={{ tools: HIDDEN }} handleKeyboardGlobally />,
+    );
+    const rect = API.createElement({ type: "rectangle" });
+    API.setElements([rect]);
+    API.setSelectedElements([rect]);
+    expect(
+      window.h.app.actionManager.isActionEnabled(actionWrapSelectionInFrame),
+    ).toBe(false);
   });
 
   it("лазер по-прежнему включается хоткеем K", async () => {

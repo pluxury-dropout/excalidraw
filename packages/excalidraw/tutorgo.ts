@@ -53,9 +53,21 @@ export const BG_LINE_BOLD_EVERY = 5;
 export const BG_FADE_FROM_PX = 14;
 export const BG_FADE_TO_PX = 8;
 
+/**
+ * Точки — два слоя: крупный (каждая вторая по обеим осям) и мелкий (остальные).
+ * Мелкий гаснет раньше: у порога затухания точек на экране вчетверо меньше
+ * (иначе ~30k прямоугольников на каждую перерисовку), и прореживание — не скачком.
+ */
+export const BG_DOTS_FINE_FROM_PX = 18;
+export const BG_DOTS_FINE_TO_PX = 12;
+
+const fade = (stepPx: number, from: number, to: number) =>
+  Math.min(1, Math.max(0, (stepPx - to) / (from - to)));
+
 /** Видимость узора от шага на экране (шаг × zoom): 1 → 0 линейно. */
 export const patternOpacity = (stepPx: number) =>
-  Math.min(
-    1,
-    Math.max(0, (stepPx - BG_FADE_TO_PX) / (BG_FADE_FROM_PX - BG_FADE_TO_PX)),
-  );
+  fade(stepPx, BG_FADE_FROM_PX, BG_FADE_TO_PX);
+
+/** Видимость мелкого слоя точек — множитель к patternOpacity. */
+export const fineDotsOpacity = (stepPx: number) =>
+  fade(stepPx, BG_DOTS_FINE_FROM_PX, BG_DOTS_FINE_TO_PX);

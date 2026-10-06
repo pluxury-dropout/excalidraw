@@ -8,6 +8,7 @@ import {
   BG_LINE_BOLD_EVERY,
   BG_LINE_COLOR,
   BG_STEP,
+  fineDotsOpacity,
   patternOpacity,
 } from "../tutorgo";
 
@@ -40,18 +41,41 @@ export const strokeTutorgoBackground = (
   context.globalAlpha = alpha;
 
   if (background === "dots") {
-    // ponytail: прямоугольник на каждую точку — до ~30k на кадр у порога
-    // затухания; если профайлер покажет, перейти на CanvasPattern из тайла.
+    // Два слоя (см. fineDotsOpacity): крупный — точки с чётными индексами по
+    // обеим осям, мелкий — остальные. Индекс считается от начала сцены, чтобы
+    // слои не менялись местами при пане. Мелкий гаснет раньше, поэтому у порога
+    // затухания на экране не больше ~8k точек вместо ~30k.
     const r = BG_DOT_RADIUS_PX * px;
-    context.fillStyle = BG_DOT_COLOR;
-    context.beginPath();
-    for (let x = offsetX; x < endX; x += step) {
-      for (let y = offsetY; y < endY; y += step) {
-        context.rect(x - r, y - r, r * 2, r * 2);
+    const even = (v: number, scroll: number) =>
+      Math.round((v - scroll) / step) % 2 === 0;
+    const dots = (coarse: boolean) => {
+      const s = coarse ? step * 2 : step;
+      const startX = (scrollX % s) - s;
+      const startY = (scrollY % s) - s;
+      context.beginPath();
+      for (let x = startX; x < endX; x += s) {
+        for (let y = startY; y < endY; y += s) {
+          if (!coarse && even(x, scrollX) && even(y, scrollY)) {
+            continue;
+          }
+          context.rect(x - r, y - r, r * 2, r * 2);
+        }
       }
+      context.fill();
+    };
+    context.fillStyle = BG_DOT_COLOR;
+    dots(true);
+    const fine = fineDotsOpacity(step * zoom.value);
+    if (fine > 0) {
+      context.globalAlpha = alpha * fine;
+      dots(false);
     }
-    context.fill();
   } else {
+    // Как strokeGrid в апстриме: на зуме 100% линия в 1px на целой координате
+    // размазывается на два пикселя — сдвигаем на полпикселя.
+    if (zoom.value === 1) {
+      context.translate(offsetX % 1 ? 0 : 0.5, offsetY % 1 ? 0 : 0.5);
+    }
     // Каждая BG_LINE_BOLD_EVERY-я линия клетки темнее — счёт от начала сцены,
     // чтобы жирные линии не прыгали при пане.
     const isBold = (v: number, scroll: number) =>

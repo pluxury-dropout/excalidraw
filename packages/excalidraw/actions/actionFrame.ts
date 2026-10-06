@@ -159,6 +159,8 @@ export const actionWrapSelectionInFrame = register({
     const selectedElements = getSelectedElements(elements, appState);
 
     return (
+      // tutorgo: без инструмента фрейма и оборачивать не во что
+      app.props.UIOptions.tools?.frame !== false &&
       selectedElements.length > 0 &&
       !selectedElements.some((element) => isFrameLikeElement(element))
     );
