@@ -69,6 +69,19 @@ describe("tutorgo: UIOptions.tools", () => {
     expect(window.h.state.activeTool.type).toBe("laser");
   });
 
+  it("лазер — последняя кнопка тулбара, цифра 0; ластик — 9", async () => {
+    const { container } = await render(
+      <Excalidraw UIOptions={{ tools: HIDDEN }} handleKeyboardGlobally />,
+    );
+    const shapes = container.querySelectorAll(".App-toolbar .Shape");
+    expect(shapes[shapes.length - 1].querySelector("input")?.dataset.testid)
+      .toBe("toolbar-laser");
+    Keyboard.keyPress("0");
+    expect(window.h.state.activeTool.type).toBe("laser");
+    Keyboard.keyPress("9");
+    expect(window.h.state.activeTool.type).toBe("eraser");
+  });
+
   it("без UIOptions всё как в апстриме", async () => {
     await render(<Excalidraw handleKeyboardGlobally />);
     Keyboard.keyPress(KEYS.D);

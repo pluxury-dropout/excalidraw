@@ -24,6 +24,7 @@ import {
   EraserIcon,
   FreedrawIcon,
   ImageIcon,
+  laserPointerToolIcon,
   LineIcon,
   RectangleIcon,
   SelectionIcon,
@@ -112,13 +113,25 @@ export const SHAPES = [
     icon: ImageIcon,
     value: "image",
     key: null,
-    numericKey: KEYS["9"],
+    // tutorgo: картинка у нас спрятана (UIOptions.tools.image), её цифра
+    // отдана ластику, а 0 — лазеру
+    numericKey: null,
     fillable: false,
   },
   {
     icon: EraserIcon,
     value: "eraser",
     key: KEYS.E,
+    numericKey: KEYS["9"],
+    fillable: false,
+  },
+  {
+    // tutorgo: лазер в основном тулбаре, последним. Буква K не здесь —
+    // её ловит отдельный тоггл в App.onKeyDown (лазер ↔ выделение);
+    // в SHAPES она сработала бы дважды за одно нажатие.
+    icon: laserPointerToolIcon,
+    value: "laser",
+    key: null,
     numericKey: KEYS["0"],
     fillable: false,
   },

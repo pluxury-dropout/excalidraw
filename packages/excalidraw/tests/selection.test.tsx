@@ -484,7 +484,12 @@ describe("tool locking & selection", () => {
     expect(h.state.activeTool.locked).toBe(true);
 
     for (const { value } of Object.values(SHAPES)) {
-      if (value !== "image" && value !== "selection" && value !== "eraser") {
+      if (
+        value !== "image" &&
+        value !== "selection" &&
+        value !== "eraser" &&
+        value !== "laser"
+      ) {
         const element = UI.createElement(value);
         expect(h.state.selectedElementIds[element.id]).not.toBe(true);
       }

@@ -45,7 +45,6 @@ import {
   extraToolsIcon,
   frameToolIcon,
   mermaidLogoIcon,
-  laserPointerToolIcon,
   MagicIcon,
 } from "./icons";
 import { KEYS } from "../keys";
@@ -280,7 +279,6 @@ export const ShapesSwitcher = ({
   const [isExtraToolsMenuOpen, setIsExtraToolsMenuOpen] = useState(false);
 
   const frameToolSelected = activeTool.type === "frame";
-  const laserToolSelected = activeTool.type === "laser";
   const embeddableToolSelected = activeTool.type === "embeddable";
 
   const { TTDDialogTriggerTunnel } = useTunnels();
@@ -299,9 +297,10 @@ export const ShapesSwitcher = ({
         const label = t(`toolBar.${value}`);
         const letter =
           key && capitalizeString(typeof key === "string" ? key : key[0]);
-        const shortcut = letter
-          ? `${letter} ${t("helpDialog.or")} ${numericKey}`
-          : `${numericKey}`;
+        // tutorgo: numericKey бывает null (картинка) — без «null» в подсказке
+        const shortcut = [letter, numericKey]
+          .filter(Boolean)
+          .join(` ${t("helpDialog.or")} `);
         return (
           <ToolButton
             className={clsx("Shape", { fillable })}
@@ -341,13 +340,9 @@ export const ShapesSwitcher = ({
       <DropdownMenu open={isExtraToolsMenuOpen}>
         <DropdownMenu.Trigger
           className={clsx("App-toolbar__extra-tools-trigger", {
+            // tutorgo: лазер переехал в основной тулбар
             "App-toolbar__extra-tools-trigger--selected":
-              frameToolSelected ||
-              embeddableToolSelected ||
-              // in collab we're already highlighting the laser button
-              // outside toolbar, so let's not highlight extra-tools button
-              // on top of it
-              (laserToolSelected && !app.props.isCollaborating),
+              frameToolSelected || embeddableToolSelected,
           })}
           onToggle={() => setIsExtraToolsMenuOpen(!isExtraToolsMenuOpen)}
           title={t("toolBar.extraTools")}
@@ -381,15 +376,6 @@ export const ShapesSwitcher = ({
               {t("toolBar.embeddable")}
             </DropdownMenu.Item>
           )}
-          <DropdownMenu.Item
-            onSelect={() => app.setActiveTool({ type: "laser" })}
-            icon={laserPointerToolIcon}
-            data-testid="toolbar-laser"
-            selected={laserToolSelected}
-            shortcut={KEYS.K.toLocaleUpperCase()}
-          >
-            {t("toolBar.laser")}
-          </DropdownMenu.Item>
           {/* tutorgo: заголовок «Generate» — только если под ним что-то есть */}
           {(UIOptions.tools?.mermaid !== false ||
             app.props.aiEnabled !== false) && (
