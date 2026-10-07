@@ -71,3 +71,40 @@ export const patternOpacity = (stepPx: number) =>
 /** Видимость мелкого слоя точек — множитель к patternOpacity. */
 export const fineDotsOpacity = (stepPx: number) =>
   fade(stepPx, BG_DOTS_FINE_FROM_PX, BG_DOTS_FINE_TO_PX);
+
+// отступ, затем «1.» / «1)» или «-» / «•», затем пробел(ы)
+const LIST_ITEM = /^(\s*)(?:(\d+)([.)])|([-•]))\s+/;
+
+/**
+ * Enter в текстовом поле на строке-пункте списка: новая строка с тем же
+ * отступом и следующим маркером. Enter на пустом пункте стирает маркер —
+ * список закончен. Возвращает null, если строка не пункт списка (или курсор
+ * стоит внутри маркера) — тогда Enter обычный.
+ * ponytail: пункты ниже не перенумеровываются при вставке в середину.
+ */
+export const continueList = (
+  value: string,
+  selStart: number,
+  selEnd: number,
+): { value: string; cursor: number } | null => {
+  const lineStart = value.lastIndexOf("\n", selStart - 1) + 1;
+  const lineEndIdx = value.indexOf("\n", selStart);
+  const lineEnd = lineEndIdx === -1 ? value.length : lineEndIdx;
+  const line = value.slice(lineStart, lineEnd);
+  const m = line.match(LIST_ITEM);
+  if (!m || selStart < lineStart + m[0].length) {
+    return null;
+  }
+  if (m[0].length === line.length && selStart === selEnd) {
+    return {
+      value: value.slice(0, lineStart) + value.slice(lineEnd),
+      cursor: lineStart,
+    };
+  }
+  const [, indent, num, delim, bullet] = m;
+  const insert = `\n${indent}${num ? `${Number(num) + 1}${delim}` : bullet} `;
+  return {
+    value: value.slice(0, selStart) + insert + value.slice(selEnd),
+    cursor: selStart + insert.length,
+  };
+};

@@ -50,6 +50,7 @@ import {
 } from "./containerCache";
 import { getTextWidth } from "./textMeasurements";
 import { normalizeText } from "./textMeasurements";
+import { continueList } from "../tutorgo";
 
 const getTransform = (
   width: number,
@@ -398,6 +399,15 @@ export const textWysiwyg = ({
       submittedViaKeyboard = true;
       handleSubmit();
     } else if (
+      // tutorgo: Enter продолжает нумерованный/маркированный список
+      event.key === KEYS.ENTER &&
+      !event.shiftKey &&
+      !event.isComposing &&
+      event.keyCode !== 229 &&
+      handleListEnter()
+    ) {
+      event.preventDefault();
+    } else if (
       event.key === KEYS.TAB ||
       (event[KEYS.CTRL_OR_CMD] &&
         (event.code === CODES.BRACKET_LEFT ||
@@ -414,6 +424,22 @@ export const textWysiwyg = ({
       // We must send an input event to resize the element
       editable.dispatchEvent(new Event("input"));
     }
+  };
+
+  const handleListEnter = () => {
+    const next = continueList(
+      editable.value,
+      editable.selectionStart,
+      editable.selectionEnd,
+    );
+    if (!next) {
+      return false;
+    }
+    editable.value = next.value;
+    editable.selectionStart = editable.selectionEnd = next.cursor;
+    // как у Tab: input ресайзит элемент и шлёт onChange
+    editable.dispatchEvent(new Event("input"));
+    return true;
   };
 
   const TAB_SIZE = 4;
