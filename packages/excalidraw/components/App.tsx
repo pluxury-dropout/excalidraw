@@ -211,6 +211,7 @@ import {
   isArrowKey,
   KEYS,
 } from "../keys";
+import { shortcutKey } from "../tutorgo";
 import {
   isElementCompletelyInViewport,
   isElementInViewport,
@@ -4045,12 +4046,10 @@ class App extends React.Component<AppProps, AppState> {
   private onKeyDown = withBatchedUpdates(
     (event: React.KeyboardEvent | KeyboardEvent) => {
       // normalize `event.key` when CapsLock is pressed #2372
-
-      if (
-        "Proxy" in window &&
-        ((!event.shiftKey && /^[A-Z]$/.test(event.key)) ||
-          (event.shiftKey && /^[a-z]$/.test(event.key)))
-      ) {
+      // tutorgo: и на нелатинской раскладке — буква с физической клавиши,
+      // чтобы хоткеи работали без переключения языка (shortcutKey)
+      const key = shortcutKey(event.key, event.code, event.shiftKey);
+      if ("Proxy" in window && key !== event.key) {
         event = new Proxy(event, {
           get(ev: any, prop) {
             const value = ev[prop];
@@ -4058,13 +4057,7 @@ class App extends React.Component<AppProps, AppState> {
               // fix for Proxies hijacking `this`
               return value.bind(ev);
             }
-            return prop === "key"
-              ? // CapsLock inverts capitalization based on ShiftKey, so invert
-                // it back
-                event.shiftKey
-                ? ev.key.toUpperCase()
-                : ev.key.toLowerCase()
-              : value;
+            return prop === "key" ? key : value;
           },
         });
       }

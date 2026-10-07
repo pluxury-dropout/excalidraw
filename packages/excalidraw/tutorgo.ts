@@ -138,3 +138,26 @@ export const continueList = (
     cursor: selStart + insert.length,
   };
 };
+
+/**
+ * `event.key` для сверки с шорткатами. На нелатинской раскладке (русской и
+ * т.п.) буква берётся с физической клавиши (`event.code` = `KeyR` → «r»):
+ * хоткеи работают без переключения языка. Латинская раскладка не трогается —
+ * на AZERTY `code` не совпадает с буквой. Регистр — по Shift: так же
+ * апстрим гасит CapsLock (#2372).
+ */
+export const shortcutKey = (
+  key: string,
+  code: string,
+  shiftKey: boolean,
+): string => {
+  let letter = key;
+  if (!/^[a-z]$/i.test(key)) {
+    const m = /^Key([A-Z])$/.exec(code);
+    if (!m || !/^\p{L}$/u.test(key)) {
+      return key;
+    }
+    letter = m[1];
+  }
+  return shiftKey ? letter.toUpperCase() : letter.toLowerCase();
+};
