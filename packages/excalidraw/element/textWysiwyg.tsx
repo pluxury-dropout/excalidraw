@@ -50,7 +50,7 @@ import {
 } from "./containerCache";
 import { getTextWidth } from "./textMeasurements";
 import { normalizeText } from "./textMeasurements";
-import { continueList } from "../tutorgo";
+import { continueList, startList } from "../tutorgo";
 
 const getTransform = (
   width: number,
@@ -356,7 +356,7 @@ export const textWysiwyg = ({
       }
     };
 
-    editable.oninput = () => {
+    editable.oninput = (event) => {
       const normalized = normalizeText(editable.value);
       if (editable.value !== normalized) {
         const selectionStart = editable.selectionStart;
@@ -365,6 +365,14 @@ export const textWysiwyg = ({
         // normalization (otherwise it'll end up at the end of the text)
         editable.selectionStart = selectionStart;
         editable.selectionEnd = selectionStart;
+      }
+      // tutorgo: пробел после «1.» / «-» в начале строки начинает список
+      if ((event as InputEvent).data === " ") {
+        const list = startList(editable.value, editable.selectionStart);
+        if (list) {
+          editable.value = list.value;
+          editable.selectionStart = editable.selectionEnd = list.cursor;
+        }
       }
       onChange(editable.value);
     };

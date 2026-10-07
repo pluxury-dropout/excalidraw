@@ -1,5 +1,42 @@
-// tutorgo: Enter продолжает список в текстовом поле.
-import { continueList } from "../tutorgo";
+// tutorgo: пробел начинает список, Enter его продолжает.
+import { continueList, startList } from "../tutorgo";
+
+// «|» — курсор сразу после набранного пробела
+const space = (text: string) => {
+  const at = text.indexOf("|");
+  const r = startList(text.replace("|", ""), at);
+  return r && r.value.slice(0, r.cursor) + "|" + r.value.slice(r.cursor);
+};
+
+describe("tutorgo: startList", () => {
+  it.each([
+    ["1. |", "    1. |"],
+    ["12) |", "    12) |"],
+    ["- |", "    • |"],
+    ["* |", "    • |"],
+    ["x\n1. |\ny", "x\n    1. |\ny"],
+    ["1. |хвост", "    1. |хвост"],
+    // уже с отступом (Tab): отступ не удваивается, «-» всё равно становится «•»
+    ["    - |", "    • |"],
+  ])("%j → %j", (before, after) => {
+    expect(space(before)).toBe(after);
+  });
+
+  it("не начало списка — пробел как есть", () => {
+    expect(space("    1. |")).toBeNull();
+    expect(space("    • |")).toBeNull();
+    expect(space("текст 1. |")).toBeNull();
+    expect(space("1.5 |")).toBeNull();
+    expect(space("1. a |")).toBeNull();
+  });
+
+  it("продолжение списка по Enter сохраняет отступ", () => {
+    const r = startList("1. ", 3)!;
+    expect(continueList(r.value + "а", r.cursor + 1, r.cursor + 1)?.value).toBe(
+      "    1. а\n    2. ",
+    );
+  });
+});
 
 // «|» — курсор
 const enter = (text: string) => {

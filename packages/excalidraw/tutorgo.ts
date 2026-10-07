@@ -75,6 +75,36 @@ export const fineDotsOpacity = (stepPx: number) =>
 // отступ, затем «1.» / «1)» или «-» / «•», затем пробел(ы)
 const LIST_ITEM = /^(\s*)(?:(\d+)([.)])|([-•]))\s+/;
 
+/** Отступ, с которого начинается список (как Tab в редакторе текста). */
+export const LIST_INDENT = "    ";
+// начало строки до только что набранного пробела: «1.», «1)», «-», «*», «•»
+const LIST_START = /^(\s*)(\d+[.)]|[-*•]) $/;
+
+/**
+ * Пробел после «1.» / «-» / «*» в начале строки начинает список, как в Miro:
+ * строка без отступа получает LIST_INDENT, «-» и «*» становятся «•».
+ * `cursor` — позиция сразу после набранного пробела. null — ничего не менять.
+ */
+export const startList = (
+  value: string,
+  cursor: number,
+): { value: string; cursor: number } | null => {
+  const lineStart = value.lastIndexOf("\n", cursor - 1) + 1;
+  const m = value.slice(lineStart, cursor).match(LIST_START);
+  if (!m) {
+    return null;
+  }
+  const marker = /\d/.test(m[2]) ? m[2] : "•";
+  const head = `${m[1] || LIST_INDENT}${marker} `;
+  if (head === m[0]) {
+    return null;
+  }
+  return {
+    value: value.slice(0, lineStart) + head + value.slice(cursor),
+    cursor: lineStart + head.length,
+  };
+};
+
 /**
  * Enter в текстовом поле на строке-пункте списка: новая строка с тем же
  * отступом и следующим маркером. Enter на пустом пункте стирает маркер —
