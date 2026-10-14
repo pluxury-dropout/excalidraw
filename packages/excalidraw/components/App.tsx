@@ -211,7 +211,7 @@ import {
   isArrowKey,
   KEYS,
 } from "../keys";
-import { shortcutKey } from "../tutorgo";
+import { shortcutKey, staticCanvasScale } from "../tutorgo";
 import {
   isElementCompletelyInViewport,
   isElementInViewport,
@@ -1736,7 +1736,11 @@ class App extends React.Component<AppProps, AppState> {
                           selectionNonce={
                             this.state.selectionElement?.versionNonce
                           }
-                          scale={window.devicePixelRatio}
+                          // tutorgo: во время жеста — пониженная плотность
+                          scale={staticCanvasScale(
+                            this.state.shouldCacheIgnoreZoom,
+                            window.devicePixelRatio,
+                          )}
                           appState={this.state}
                           renderConfig={{
                             imageCache: this.imageCache,
@@ -10988,11 +10992,16 @@ class App extends React.Component<AppProps, AppState> {
         return;
       }
 
+      // tutorgo: пан колесом/тачпадом — тоже жест (GESTURE_DPR), как зум колесом
+      // и тач-пан выше. Зум не меняется — кэш элементов остаётся валидным.
+      this.resetShouldCacheIgnoreZoomDebounced();
+
       // scroll horizontally when shift pressed
       if (event.shiftKey) {
         this.translateCanvas(({ zoom, scrollX }) => ({
           // on Mac, shift+wheel tends to result in deltaX
           scrollX: scrollX - (deltaY || deltaX) / zoom.value,
+          shouldCacheIgnoreZoom: true,
         }));
         return;
       }
@@ -11000,6 +11009,7 @@ class App extends React.Component<AppProps, AppState> {
       this.translateCanvas(({ zoom, scrollX, scrollY }) => ({
         scrollX: scrollX - deltaX / zoom.value,
         scrollY: scrollY - deltaY / zoom.value,
+        shouldCacheIgnoreZoom: true,
       }));
     },
   );

@@ -161,3 +161,17 @@ export const shortcutKey = (
   }
   return shiftKey ? letter.toUpperCase() : letter.toLowerCase();
 };
+
+/**
+ * Плотность основного холста во время жеста (pinch, пан двумя пальцами или
+ * тачпадом, зум колесом) — спека TutorGo 2026-10-14-board-render-performance,
+ * п. 3.4. Копирование кэш-холстов элементов — главная цена кадра пана на доске
+ * с сотнями картинок; при 1 вместо dpr 2 пикселей в кадре вчетверо меньше.
+ * Пока жест идёт, доска чуть мылится; через 300 мс после — снова резкая.
+ * Больше — резче в движении и дороже; `Infinity` фактически выключает приём.
+ */
+export const GESTURE_DPR = 1;
+
+/** Плотность статичного холста: во время жеста — не выше GESTURE_DPR. */
+export const staticCanvasScale = (inGesture: boolean, dpr: number) =>
+  inGesture ? Math.min(dpr, GESTURE_DPR) : dpr;

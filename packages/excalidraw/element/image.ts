@@ -14,8 +14,15 @@ import type {
 export const loadHTMLImageElement = (dataURL: DataURL) => {
   return new Promise<HTMLImageElement>((resolve, reject) => {
     const image = new Image();
+    // tutorgo: декод до попадания в кэш — иначе браузер вправе отложить его до
+    // первого drawImage и сделать в главном потоке посреди кадра. Сбой decode()
+    // не фатален: картинка загружена, отдаём как раньше. Без decode (jsdom,
+    // Safari < 11.1) — сразу.
     image.onload = () => {
-      resolve(image);
+      (image.decode?.() ?? Promise.resolve()).then(
+        () => resolve(image),
+        () => resolve(image),
+      );
     };
     image.onerror = (error) => {
       reject(error);
