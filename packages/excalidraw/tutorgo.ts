@@ -175,3 +175,24 @@ export const GESTURE_DPR = 1;
 /** Плотность статичного холста: во время жеста — не выше GESTURE_DPR. */
 export const staticCanvasScale = (inGesture: boolean, dpr: number) =>
   inGesture ? Math.min(dpr, GESTURE_DPR) : dpr;
+
+/**
+ * ЭКСПЕРИМЕНТ (спека TutorGo 2026-10-14-board-render-performance, §3.6, вопрос 1):
+ * картинки рисуются прямо на основной холст — веткой экспорта, мимо кэш-холстов
+ * элементов. Проверяем гипотезу «длинные кадры пана — это drawImage из сотен
+ * кэш-холстов, вытесненных из видеопамяти».
+ *
+ * Включается только в браузере, где `localStorage["tg-img-direct"] = "1"`, после
+ * перезагрузки вкладки; у всех остальных — поведение апстрима. Удалить или
+ * превратить в постоянное поведение по итогам замера.
+ */
+export const IMG_DIRECT = (() => {
+  try {
+    return (
+      typeof localStorage !== "undefined" &&
+      localStorage.getItem("tg-img-direct") === "1"
+    );
+  } catch {
+    return false;
+  }
+})();

@@ -38,7 +38,12 @@ import type {
   PendingExcalidrawElements,
 } from "../types";
 import { getDefaultAppState } from "../appState";
-import { PEN_SCALE, PEN_SPEED_SCALE, PEN_THINNING } from "../tutorgo";
+import {
+  IMG_DIRECT,
+  PEN_SCALE,
+  PEN_SPEED_SCALE,
+  PEN_THINNING,
+} from "../tutorgo";
 import {
   BOUND_TEXT_PADDING,
   DEFAULT_REDUCED_GLOBAL_ALPHA,
@@ -810,7 +815,15 @@ export const renderElement = (
       // beforehand because math helpers (such as getElementAbsoluteCoords)
       // rely on existing shapes
       ShapeCache.generateElementShape(element, renderConfig);
-      if (renderConfig.isExporting) {
+      if (
+        renderConfig.isExporting ||
+        // tutorgo: эксперимент IMG_DIRECT — картинка мимо кэш-холста. Кроп в
+        // процессе редактирования (полупрозрачный «призрак» целой картинки)
+        // остаётся на кэш-пути.
+        (IMG_DIRECT &&
+          element.type === "image" &&
+          element.id !== appState.croppingElementId)
+      ) {
         const [x1, y1, x2, y2] = getElementAbsoluteCoords(element, elementsMap);
         const cx = (x1 + x2) / 2 + appState.scrollX;
         const cy = (y1 + y2) / 2 + appState.scrollY;

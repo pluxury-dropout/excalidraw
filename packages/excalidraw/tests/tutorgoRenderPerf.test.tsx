@@ -11,6 +11,55 @@ import { fireEvent, render, waitFor } from "./test-utils";
 
 import type { LocalPoint } from "@excalidraw/math";
 
+describe("tutorgo: эксперимент IMG_DIRECT", () => {
+  // Флаг читается из localStorage при импорте модуля — каждому случаю свежий граф.
+  const renderImage = async (flag: string | null) => {
+    vi.resetModules();
+    if (flag === null) {
+      localStorage.removeItem("tg-img-direct");
+    } else {
+      localStorage.setItem("tg-img-direct", flag);
+    }
+    const { renderElement, elementWithCanvasCache } = await import(
+      "../renderer/renderElement"
+    );
+    const { getDefaultAppState } = await import("../appState");
+    const { arrayToMap } = await import("../utils");
+    const rough = (await import("roughjs/bin/rough")).default;
+
+    const el = API.createElement({ type: "image", width: 100, height: 140 });
+    const canvas = document.createElement("canvas");
+    const map = arrayToMap([el]) as any;
+    renderElement(
+      el,
+      map,
+      map,
+      rough.canvas(canvas),
+      canvas.getContext("2d")!,
+      {
+        imageCache: new Map(),
+        isExporting: false,
+        renderGrid: false,
+        canvasBackgroundColor: "#fff",
+        embedsValidationStatus: new Map(),
+        elementsPendingErasure: new Set(),
+        pendingFlowchartNodes: null,
+      },
+      { ...getDefaultAppState(), width: 800, height: 600 } as any,
+    );
+    localStorage.removeItem("tg-img-direct");
+    return elementWithCanvasCache.has(el);
+  };
+
+  it("без флага картинка идёт через кэш-холст (апстрим)", async () => {
+    expect(await renderImage(null)).toBe(true);
+  });
+
+  it("с флагом — мимо кэш-холста", async () => {
+    expect(await renderImage("1")).toBe(false);
+  });
+});
+
 describe("tutorgo: кэш границ штриха пера", () => {
   it("новый массив точек — новые границы, тот же — тот же результат", () => {
     const el = API.createElement({
