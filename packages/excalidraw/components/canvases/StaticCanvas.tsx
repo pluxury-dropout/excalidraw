@@ -54,8 +54,12 @@ const StaticCanvas = (props: StaticCanvasProps) => {
       canvas.style.height = heightString;
     }
 
-    const scaledWidth = props.appState.width * props.scale;
-    const scaledHeight = props.appState.height * props.scale;
+    // tutorgo: floor — appState.width/height из getBoundingClientRect дробные, dpr
+    // на Windows тоже (1.25/1.5), а canvas.width хранит целое: без floor сравнение
+    // ниже всегда «не равно», и холст пересоздавался на каждом рендере (профиль
+    // 2026-10-14: 1859 раз за 35 с пана).
+    const scaledWidth = Math.floor(props.appState.width * props.scale);
+    const scaledHeight = Math.floor(props.appState.height * props.scale);
     // setting width/height resets the canvas even if dimensions not changed,
     // which would cause flicker when we skip frame (due to throttling)
     // tutorgo: плотность меняется на старте/конце жеста (GESTURE_DPR) — холст

@@ -529,10 +529,23 @@ export const getBoundsFromPoints = (
   return [minX, minY, maxX, maxY];
 };
 
+// tutorgo: границы штриха зовутся на каждый кадр для каждого штриха в кадре и для
+// хит-теста, а getBoundsFromPoints идёт по всем точкам. points иммутабелен
+// (правка штриха = новый массив) — кэшируем по ссылке.
+const freeDrawBoundsCache = new WeakMap<
+  ExcalidrawFreeDrawElement["points"],
+  Bounds
+>();
+
 const getFreeDrawElementAbsoluteCoords = (
   element: ExcalidrawFreeDrawElement,
 ): [number, number, number, number, number, number] => {
-  const [minX, minY, maxX, maxY] = getBoundsFromPoints(element.points);
+  let bounds = freeDrawBoundsCache.get(element.points);
+  if (!bounds) {
+    bounds = getBoundsFromPoints(element.points);
+    freeDrawBoundsCache.set(element.points, bounds);
+  }
+  const [minX, minY, maxX, maxY] = bounds;
   const x1 = minX + element.x;
   const y1 = minY + element.y;
   const x2 = maxX + element.x;
