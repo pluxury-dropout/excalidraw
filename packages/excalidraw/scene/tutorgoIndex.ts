@@ -16,6 +16,8 @@ type Id = ExcalidrawElement["id"];
 
 type Entry = {
   version: number;
+  /** LWW-reconcile: два участника дают одну version, но разный versionNonce. */
+  versionNonce: number;
   /** null — элемент в «всегда»-наборе, в сетке его нет. */
   cells: string[] | null;
   order: number;
@@ -46,7 +48,11 @@ export class TutorgoSpatialIndex {
     for (let i = 0; i < elements.length; i++) {
       const el = elements[i];
       const prev = this.entries.get(el.id);
-      if (prev && prev.version === el.version) {
+      if (
+        prev &&
+        prev.version === el.version &&
+        prev.versionNonce === el.versionNonce
+      ) {
         prev.order = i;
         prev.gen = gen;
         continue;
@@ -55,7 +61,13 @@ export class TutorgoSpatialIndex {
         this.unlink(el.id, prev);
       }
       const cells = this.cellsOf(el, elementsMap);
-      this.entries.set(el.id, { version: el.version, cells, order: i, gen });
+      this.entries.set(el.id, {
+        version: el.version,
+        versionNonce: el.versionNonce,
+        cells,
+        order: i,
+        gen,
+      });
       if (cells) {
         for (const key of cells) {
           let bucket = this.grid.get(key);

@@ -136,6 +136,23 @@ describe("tutorgo: пространственный индекс", () => {
     expect(index.query(60, 60, 70, 70).has(b.id)).toBe(true);
   });
 
+  it("та же version, другой versionNonce (LWW-reconcile) — пересчитывается", () => {
+    const a = rect(0, 0);
+    const index = new TutorgoSpatialIndex();
+    index.sync([a] as NonDeletedExcalidrawElement[], mapOf([a]), 1);
+
+    // чужая правка того же элемента: version совпала, versionNonce и координаты нет
+    const moved = {
+      ...a,
+      x: a.x + 5000,
+      y: a.y + 5000,
+      versionNonce: a.versionNonce + 1,
+    } as NonDeletedExcalidrawElement;
+    index.sync([moved], mapOf([moved]), 2);
+    expect(index.query(10, 10, 20, 20).has(a.id)).toBe(false);
+    expect(index.query(5010, 5010, 5020, 5020).has(a.id)).toBe(true);
+  });
+
   it("тот же nonce — no-op", () => {
     const a = rect(0, 0);
     const els = [a] as NonDeletedExcalidrawElement[];
