@@ -3,11 +3,13 @@ import React from "react";
 import { pointFrom } from "@excalidraw/math";
 
 import { DEFAULT_COLLISION_THRESHOLD } from "../constants";
-import { getElementBounds } from "../element/bounds";
+import { getElementAbsoluteCoords, getElementBounds } from "../element/bounds";
 import { LinearElementEditor } from "../element/linearElementEditor";
 import { mutateElement } from "../element/mutateElement";
 import { isElementInViewport } from "../element/sizeHelpers";
+import { isTextElement } from "../element/typeChecks";
 import { syncInvalidIndices } from "../fractionalIndex";
+import { getContainingFrame, isCursorInFrame } from "../frame";
 import { Excalidraw } from "../index";
 import { Renderer } from "../scene/Renderer";
 import Scene from "../scene/Scene";
@@ -397,5 +399,146 @@ describe("tutorgo: индекс в приложении", () => {
       getElementBounds(r, h.app.scene.getNonDeletedElementsMap())[2],
     ).toBeCloseTo(right);
     expect(at(1024 + 1.2 * t, 0)?.id).toBe(r.id);
+  });
+
+  it("выделенные ромб, эллипс, штрих под 45° — ловятся в углу рамки выделения", () => {
+    // Рамка выделения строится по неповёрнутому прямоугольнику и поворачивается
+    // целиком, а границы в индексе — узкая рамка уже повёрнутой геометрии:
+    // у ромба и диагонального штриха на 45° разница — сотни пикселей.
+    const cases = [
+      API.createElement({ type: "diamond", x: 0, y: 0, width: 1000 }),
+      API.createElement({ type: "ellipse", x: -50, y: 0, width: 1000 }),
+      API.createElement({
+        type: "freedraw",
+        x: 0,
+        y: 0,
+        width: 1000,
+        points: [
+          pointFrom<LocalPoint>(0, 0),
+          pointFrom<LocalPoint>(1000, 1000),
+        ],
+      }),
+    ];
+    const missed: string[] = [];
+    for (const el of cases) {
+      mutateElement(el, { angle: (Math.PI / 4) as any }, false);
+      API.setElements([el]);
+      API.setSelectedElements([el]);
+      const map = h.app.scene.getNonDeletedElementsMap();
+      const [, , x2] = getElementBounds(el, map);
+      const [, , , , cx, cy] = getElementAbsoluteCoords(el, map);
+      // в правом «острие» повёрнутой рамки выделения, в соседней ячейке индекса
+      const px = cx + 650;
+      const t = DEFAULT_COLLISION_THRESHOLD;
+      expect(Math.floor((px - 2 * t) / 1024)).toBeGreaterThan(
+        Math.floor(x2 / 1024),
+      );
+      if (at(px, cy)?.id !== el.id) {
+        missed.push(el.type);
+      }
+    }
+    expect(missed).toEqual([]);
+  });
+
+  it("паритет хит-теста с перебором (типы, повороты, выделение, zoom)", () => {
+    const rnd = seeded(7);
+    const types = [
+      "rectangle",
+      "diamond",
+      "ellipse",
+      "freedraw",
+      "line",
+      "arrow",
+    ] as const;
+    const frame = API.createElement({
+      type: "frame",
+      x: -1000,
+      y: -1000,
+      width: 2000,
+      height: 2000,
+    });
+    const els: ExcalidrawElement[] = [frame];
+    for (let i = 0; i < 150; i++) {
+      const type = types[i % types.length];
+      // крупные (до 4 ячеек): у повёрнутых выделенных угол рамки выделения
+      // уходит за их ячейки в индексе — то, что тест обязан ловить
+      const w = 10 + rnd() * 4000;
+      const hh = 10 + rnd() * 4000;
+      const common = {
+        x: (rnd() - 0.5) * 12000,
+        y: (rnd() - 0.5) * 12000,
+        width: w,
+        height: hh,
+        angle: (rnd() < 0.5 ? rnd() * 2 * Math.PI : 0) as any,
+        frameId: rnd() < 0.1 ? frame.id : null,
+        ...(rnd() < 0.5
+          ? { backgroundColor: "#ff0000", fillStyle: "solid" as const }
+          : {}),
+      };
+      let el: ExcalidrawElement;
+      if (type === "freedraw" || type === "line" || type === "arrow") {
+        const points = [pointFrom<LocalPoint>(0, 0)];
+        const n = type === "freedraw" ? 20 : 1 + Math.floor(rnd() * 3);
+        for (let p = 0; p < n; p++) {
+          points.push(pointFrom<LocalPoint>(rnd() * w, rnd() * hh));
+        }
+        points.push(pointFrom<LocalPoint>(w, hh));
+        el = API.createElement({ type, ...common, points });
+      } else {
+        el = API.createElement({ type, ...common });
+      }
+      if (rnd() < 0.1) {
+        mutateElement(el, { locked: true }, false);
+      }
+      els.push(el);
+    }
+    els.push(...API.createLabeledArrow());
+    API.setElements(syncInvalidIndices(els));
+    API.setSelectedElements(els.filter(() => rnd() < 0.5));
+
+    const app = h.app as any;
+    // апстримный getElementsAtPosition: те же фильтры по всем элементам
+    const reference = (x: number, y: number) => {
+      const map = h.app.scene.getNonDeletedElementsMap();
+      return h.app.scene
+        .getNonDeletedElements()
+        .filter((el) => !el.locked && !(isTextElement(el) && el.containerId))
+        .filter((el) => app.hitElement(x, y, el))
+        .filter((el) => {
+          const f = getContainingFrame(el, map);
+          return f &&
+            h.state.frameRendering.enabled &&
+            h.state.frameRendering.clip
+            ? isCursorInFrame({ x, y }, f, map)
+            : true;
+        })
+        .map((el) => el.id);
+    };
+
+    let hits = 0;
+    for (const z of [0.05, 0.3, 1, 2.5, 4]) {
+      API.setAppState({ zoom: { value: z as NormalizedZoomValue } });
+      const t = DEFAULT_COLLISION_THRESHOLD / z;
+      const map = h.app.scene.getNonDeletedElementsMap();
+      for (let i = 0; i < 300; i++) {
+        // точка у элемента с запасом за его границы — туда, где рамка
+        // выделения (у ромба на 45° — до половины ширины) и порог хит-теста
+        // выходят за рамку в индексе
+        const el = els[1 + Math.floor(rnd() * (els.length - 1))];
+        const [x1, y1, x2, y2] = getElementBounds(el, map);
+        const mx = 0.5 * (x2 - x1) + 3 * t;
+        const my = 0.5 * (y2 - y1) + 3 * t;
+        const x = x1 - mx + rnd() * (x2 - x1 + 2 * mx);
+        const y = y1 - my + rnd() * (y2 - y1 + 2 * my);
+        const expected = reference(x, y);
+        const actual = app
+          .getElementsAtPosition(x, y)
+          .map((e: ExcalidrawElement) => e.id);
+        expect(actual).toEqual(expected);
+        hits += expected.length;
+      }
+    }
+    // проверка не выродилась в «везде пусто»
+    expect(hits).toBeGreaterThan(100);
   });
 });

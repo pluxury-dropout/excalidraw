@@ -9,6 +9,7 @@ import { renderInteractiveSceneThrottled } from "../renderer/interactiveScene";
 import { renderStaticSceneThrottled } from "../renderer/staticScene";
 
 import type { AppState } from "../types";
+// tutorgo: + viewportCoordsToSceneCoords — прямоугольник вьюпорта для индекса
 import { memoize, toBrandedType, viewportCoordsToSceneCoords } from "../utils";
 import type Scene from "./Scene";
 import type { RenderableElementsMap } from "./types";

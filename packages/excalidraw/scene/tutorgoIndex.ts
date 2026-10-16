@@ -128,7 +128,8 @@ export class TutorgoSpatialIndex {
 
   /**
    * Кандидаты из прямоугольника сцены — элементы `elementsMap` (чего в ней нет,
-   * отброшено) в z-порядке сцены. Точные фильтры остаются за вызывающим.
+   * отброшено) в z-порядке сцены, плюс `extra` — id, которые нужны всегда.
+   * Точные фильтры остаются за вызывающим.
    */
   candidates<T extends ExcalidrawElement>(
     x1: number,
@@ -136,8 +137,12 @@ export class TutorgoSpatialIndex {
     x2: number,
     y2: number,
     elementsMap: ReadonlyMap<Id, T>,
+    extra: Iterable<Id> = [],
   ): T[] {
     const ids = this.query(x1, y1, x2, y2);
+    for (const id of extra) {
+      ids.add(id);
+    }
     // Отдалённый вид: индекс вернул всех — map уже в z-порядке, сортировка
     // n·log n была бы дороже прежнего прохода.
     if (ids.size >= elementsMap.size) {

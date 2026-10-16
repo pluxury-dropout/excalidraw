@@ -5045,12 +5045,20 @@ class App extends React.Component<AppProps, AppState> {
     const elementsMap = this.scene.getNonDeletedElementsMap();
 
     // tutorgo: кандидаты из пространственного индекса вместо всех элементов
-    // доски. Запас 2t, не t: рамка выделенного (hitElement) раздута на t и
-    // повёрнута с элементом — на 45° её угол выходит за границы на t·√2.
-    const t = 2 * this.getElementHitThreshold();
+    // доски. Выделенные — всегда: hitElement бьёт их по рамке выделения, а она
+    // строится по неповёрнутому прямоугольнику и поворачивается целиком — у
+    // повёрнутого ромба/эллипса/штриха её углы далеко за границами в индексе.
+    const t = this.getElementHitThreshold();
     const candidates = this.scene
       .getTutorgoIndex()
-      .candidates(x - t, y - t, x + t, y + t, elementsMap);
+      .candidates(
+        x - t,
+        y - t,
+        x + t,
+        y + t,
+        elementsMap,
+        Object.keys(this.state.selectedElementIds),
+      );
 
     const elements = (
       includeBoundTextElement && includeLockedElements
