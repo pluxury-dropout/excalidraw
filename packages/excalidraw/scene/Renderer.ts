@@ -9,7 +9,7 @@ import { renderInteractiveSceneThrottled } from "../renderer/interactiveScene";
 import { renderStaticSceneThrottled } from "../renderer/staticScene";
 
 import type { AppState } from "../types";
-import { memoize, toBrandedType } from "../utils";
+import { memoize, toBrandedType, viewportCoordsToSceneCoords } from "../utils";
 import type Scene from "./Scene";
 import type { RenderableElementsMap } from "./types";
 
@@ -41,7 +41,28 @@ export class Renderer {
       width: AppState["width"];
     }): readonly NonDeletedExcalidrawElement[] => {
       const visibleElements: NonDeletedExcalidrawElement[] = [];
-      for (const element of elementsMap.values()) {
+      // tutorgo: кандидаты из пространственного индекса (прямоугольник вьюпорта
+      // в координатах сцены, как в isElementInViewport) вместо всех элементов;
+      // точная проверка ниже — прежняя.
+      const transform = { zoom, offsetLeft, offsetTop, scrollX, scrollY };
+      const topLeft = viewportCoordsToSceneCoords(
+        { clientX: offsetLeft, clientY: offsetTop },
+        transform,
+      );
+      const bottomRight = viewportCoordsToSceneCoords(
+        { clientX: offsetLeft + width, clientY: offsetTop + height },
+        transform,
+      );
+      const candidates = this.scene
+        .getTutorgoIndex()
+        .candidates(
+          topLeft.x,
+          topLeft.y,
+          bottomRight.x,
+          bottomRight.y,
+          elementsMap,
+        );
+      for (const element of candidates) {
         if (
           isElementInViewport(
             element,

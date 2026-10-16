@@ -5044,17 +5044,23 @@ class App extends React.Component<AppProps, AppState> {
 
     const elementsMap = this.scene.getNonDeletedElementsMap();
 
+    // tutorgo: кандидаты из пространственного индекса вместо всех элементов
+    // доски. Запас 2t, не t: рамка выделенного (hitElement) раздута на t и
+    // повёрнута с элементом — на 45° её угол выходит за границы на t·√2.
+    const t = 2 * this.getElementHitThreshold();
+    const candidates = this.scene
+      .getTutorgoIndex()
+      .candidates(x - t, y - t, x + t, y + t, elementsMap);
+
     const elements = (
       includeBoundTextElement && includeLockedElements
-        ? this.scene.getNonDeletedElements()
-        : this.scene
-            .getNonDeletedElements()
-            .filter(
-              (element) =>
-                (includeLockedElements || !element.locked) &&
-                (includeBoundTextElement ||
-                  !(isTextElement(element) && element.containerId)),
-            )
+        ? candidates
+        : candidates.filter(
+            (element) =>
+              (includeLockedElements || !element.locked) &&
+              (includeBoundTextElement ||
+                !(isTextElement(element) && element.containerId)),
+          )
     )
       .filter((el) => this.hitElement(x, y, el))
       .filter((element) => {

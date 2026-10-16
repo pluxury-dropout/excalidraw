@@ -26,6 +26,8 @@ import { arrayToMap } from "../utils";
 import { toBrandedType } from "../utils";
 import { ENV } from "../constants";
 import { getElementsInGroup } from "../groups";
+// tutorgo: пространственный индекс для хит-теста и отбора видимых
+import { TutorgoSpatialIndex } from "./tutorgoIndex";
 
 type ElementIdKey = InstanceType<typeof LinearElementEditor>["elementId"];
 type ElementKey = ExcalidrawElement | ElementIdKey;
@@ -171,6 +173,18 @@ class Scene {
 
   getSceneNonce() {
     return this.sceneNonce;
+  }
+
+  // tutorgo: индекс, догнанный до текущей сцены; при том же nonce — no-op.
+  private tutorgoIndex = new TutorgoSpatialIndex();
+
+  getTutorgoIndex() {
+    this.tutorgoIndex.sync(
+      this.getNonDeletedElements(),
+      this.getNonDeletedElementsMap(),
+      this.getSceneNonce(),
+    );
+    return this.tutorgoIndex;
   }
 
   getNonDeletedElementsMap() {

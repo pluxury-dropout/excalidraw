@@ -3,7 +3,7 @@
 // (хит-тест, отбор видимых) берут кандидатов из ячеек вместо прохода по всем
 // элементам доски; точные фильтры остаются за ними — индекс отвечает «может».
 import { getElementBounds } from "../element/bounds";
-import { isFrameLikeElement } from "../element/typeChecks";
+import { isFrameLikeElement, isTextElement } from "../element/typeChecks";
 import { INDEX_CELL, INDEX_MAX_CELLS } from "../tutorgo";
 
 import type {
@@ -32,7 +32,7 @@ export class TutorgoSpatialIndex {
   private lastNonce: number | undefined;
   private gen = 0;
 
-  /** Пересобирает изменённое (по version), удаляет пропавшее; no-op при том же nonce. */
+  /** Пересобирает изменённое (по паре version, versionNonce), удаляет пропавшее; no-op при том же nonce. */
   sync(
     elements: readonly NonDeletedExcalidrawElement[],
     elementsMap: ElementsMap,
@@ -124,6 +124,40 @@ export class TutorgoSpatialIndex {
       }
     }
     return result;
+  }
+
+  /**
+   * Кандидаты из прямоугольника сцены — элементы `elementsMap` (чего в ней нет,
+   * отброшено) в z-порядке сцены. Точные фильтры остаются за вызывающим.
+   */
+  candidates<T extends ExcalidrawElement>(
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+    elementsMap: ReadonlyMap<Id, T>,
+  ): T[] {
+    const ids = this.query(x1, y1, x2, y2);
+    // Отдалённый вид: индекс вернул всех — map уже в z-порядке, сортировка
+    // n·log n была бы дороже прежнего прохода.
+    if (ids.size >= elementsMap.size) {
+      return Array.from(elementsMap.values());
+    }
+    const result: T[] = [];
+    for (const id of ids) {
+      const el = elementsMap.get(id);
+      if (!el) {
+        continue;
+      }
+      result.push(el);
+      // Подпись стрелки торчит за рамку стрелки, а правка подписи version
+      // стрелки не поднимает — её ячейки могли устареть, ячейки подписи свежие.
+      // Нашли подпись — берём и контейнер (добавленное в Set обход ещё встретит).
+      if (isTextElement(el) && el.containerId) {
+        ids.add(el.containerId);
+      }
+    }
+    return result.sort((a, b) => this.order(a.id) - this.order(b.id));
   }
 
   /** Позиция элемента в массиве сцены на момент sync — z-порядок для сортировки. */
