@@ -62,10 +62,6 @@ const StaticCanvas = (props: StaticCanvasProps) => {
     const scaledHeight = Math.floor(props.appState.height * props.scale);
     // setting width/height resets the canvas even if dimensions not changed,
     // which would cause flicker when we skip frame (due to throttling)
-    // tutorgo: плотность меняется на старте/конце жеста (GESTURE_DPR) — холст
-    // уже очищен, отложенный на rAF рендер оставил бы пустой кадр.
-    const resized =
-      canvas.width !== scaledWidth || canvas.height !== scaledHeight;
     if (canvas.width !== scaledWidth) {
       canvas.width = scaledWidth;
     }
@@ -84,7 +80,7 @@ const StaticCanvas = (props: StaticCanvasProps) => {
         appState: props.appState,
         renderConfig: props.renderConfig,
       },
-      isRenderThrottlingEnabled() && !resized,
+      isRenderThrottlingEnabled(),
     );
   });
 
