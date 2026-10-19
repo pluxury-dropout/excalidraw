@@ -38,7 +38,11 @@ export class TutorgoSpatialIndex {
    * sync, только если что-то изменилось.
    */
   static onSync:
-    | ((index: TutorgoSpatialIndex, changes: IndexChange[]) => void)
+    | ((
+        index: TutorgoSpatialIndex,
+        changes: IndexChange[],
+        elementsMap: ElementsMap,
+      ) => void)
     | null = null;
 
   private grid = new Map<string, Set<Id>>();
@@ -115,7 +119,7 @@ export class TutorgoSpatialIndex {
     }
 
     if (changes?.length) {
-      TutorgoSpatialIndex.onSync?.(this, changes);
+      TutorgoSpatialIndex.onSync?.(this, changes, elementsMap);
     }
   }
 

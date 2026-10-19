@@ -100,7 +100,8 @@ const shouldResetImageFilter = (
   );
 };
 
-const getCanvasPadding = (element: ExcalidrawElement) => {
+// tutorgo: export — запас границ для инвалидации тайлов (renderer/tutorgoTiles.ts)
+export const getCanvasPadding = (element: ExcalidrawElement) => {
   switch (element.type) {
     case "freedraw":
       return element.strokeWidth * 12;

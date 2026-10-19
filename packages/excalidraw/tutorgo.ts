@@ -174,6 +174,42 @@ export const INDEX_CELL = 1024;
 export const INDEX_MAX_CELLS = 256;
 
 /**
+ * ПРОТОТИП тайлов (renderer/tutorgoTiles.ts, спека TutorGo
+ * 2026-10-15-board-tiled-rendering §3.1–3.2, план 2026-10-19-board-tiles-prototype):
+ * статичный слой — готовые квадраты-битмапы вместо всех видимых элементов.
+ * Включается только при `localStorage["tg-tiles"] = "1"` после перезагрузки —
+ * инструмент замера; готовое включается у всех, флаг удаляется.
+ */
+export const TILES = (() => {
+  try {
+    return (
+      typeof localStorage !== "undefined" &&
+      localStorage.getItem("tg-tiles") === "1"
+    );
+  } catch {
+    return false;
+  }
+})();
+/** Сторона тайла в пикселях устройства. */
+export const TILE_PX = 512;
+/** Время на отрисовку тайлов за кадр (60 Гц — 16,7 мс на всё). */
+export const TILE_FRAME_BUDGET_MS = 6;
+/** Бюджет, пока на экране дыра без заглушки: показать хоть что-то важнее fps. */
+export const TILE_EMPTY_BUDGET_MS = 20;
+/** Тайлов в кэше (тайл = 1 МБ). У Safari на iOS общий потолок памяти холстов. */
+export const TILE_BUDGET = 160;
+/** Освободившихся холстов держим для переиспользования (без GC и getContext). */
+export const TILE_POOL = 8;
+/** Правка свежее этого рисуется живьём поверх тайлов, тайлы не трогает. */
+export const HOT_MS = 500;
+/** Больше изменений за один sync — массовая загрузка (сид, импорт), не «свежее». */
+export const HOT_BULK = 500;
+/** На сколько уровней грубее искать заглушку для недорисованного тайла. */
+export const TILE_FALLBACK_LEVELS = 3;
+/** Длинная сторона уменьшенной копии картинки для дальних уровней. */
+export const LOD_SIDE = 256;
+
+/**
  * ЭКСПЕРИМЕНТ (спека TutorGo 2026-10-14-board-render-performance, §3.6, вопрос 1):
  * картинки рисуются прямо на основной холст — веткой экспорта, мимо кэш-холстов
  * элементов. Проверяем гипотезу «длинные кадры пана — это drawImage из сотен
