@@ -15,6 +15,8 @@ import { Renderer } from "../scene/Renderer";
 import Scene from "../scene/Scene";
 import { TutorgoSpatialIndex } from "../scene/tutorgoIndex";
 
+import type { IndexChange } from "../scene/tutorgoIndex";
+
 import { API } from "./helpers/api";
 import { Pointer, UI } from "./helpers/ui";
 import { render } from "./test-utils";
@@ -540,5 +542,50 @@ describe("tutorgo: индекс в приложении", () => {
     }
     // проверка не выродилась в «везде пусто»
     expect(hits).toBeGreaterThan(100);
+  });
+
+  describe("onSync", () => {
+    afterEach(() => {
+      TutorgoSpatialIndex.onSync = null;
+    });
+
+    it("новый, изменённый, удалённый элемент — со старыми и новыми границами", () => {
+      const a = rect(0, 0);
+      const b = rect(50, 50);
+      const els = [a, b] as NonDeletedExcalidrawElement[];
+      const index = new TutorgoSpatialIndex();
+      const calls: IndexChange[][] = [];
+      TutorgoSpatialIndex.onSync = (_, changes) => calls.push(changes);
+
+      index.sync(els, mapOf(els), 1);
+      expect(calls[0].map((c) => [c.id, c.prev])).toEqual([
+        [a.id, null],
+        [b.id, null],
+      ]);
+      const aBefore = getElementBounds(a, mapOf(els));
+      const bBefore = getElementBounds(b, mapOf(els));
+      expect(index.bounds(a.id)).toEqual(aBefore);
+
+      mutateElement(a, { x: a.x + 5000 });
+      index.sync([a] as NonDeletedExcalidrawElement[], mapOf([a]), 2);
+      expect(calls).toHaveLength(2);
+      expect(calls[1]).toEqual([
+        { id: a.id, prev: aBefore, next: getElementBounds(a, mapOf([a])) },
+        { id: b.id, prev: bBefore, next: null },
+      ]);
+      expect(index.bounds(b.id)).toBe(null);
+    });
+
+    it("без изменений не зовётся", () => {
+      const a = rect(0, 0);
+      const els = [a] as NonDeletedExcalidrawElement[];
+      const index = new TutorgoSpatialIndex();
+      let calls = 0;
+      TutorgoSpatialIndex.onSync = () => calls++;
+      index.sync(els, mapOf(els), 1);
+      index.sync(els, mapOf(els), 1);
+      index.sync(els, mapOf(els), 2);
+      expect(calls).toBe(1);
+    });
   });
 });

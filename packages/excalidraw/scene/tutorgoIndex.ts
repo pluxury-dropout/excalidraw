@@ -14,18 +14,33 @@ import type {
 
 type Id = ExcalidrawElement["id"];
 
+export type Bounds = readonly [x1: number, y1: number, x2: number, y2: number];
+
+/** prev = null — элемент новый, next = null — удалён. */
+export type IndexChange = { id: Id; prev: Bounds | null; next: Bounds | null };
+
 type Entry = {
   version: number;
   /** LWW-reconcile: два участника дают одну version, но разный versionNonce. */
   versionNonce: number;
   /** null — элемент в «всегда»-наборе, в сетке его нет. */
   cells: string[] | null;
+  bounds: Bounds;
   order: number;
   /** Поколение последнего sync, на котором элемент встретился. */
   gen: number;
 };
 
 export class TutorgoSpatialIndex {
+  /**
+   * Слушатель изменений (тайлы, renderer/tutorgoTiles.ts): старые границы нужны
+   * инвалидации — по ним элемент ещё нарисован в готовых тайлах. Зовётся в конце
+   * sync, только если что-то изменилось.
+   */
+  static onSync:
+    | ((index: TutorgoSpatialIndex, changes: IndexChange[]) => void)
+    | null = null;
+
   private grid = new Map<string, Set<Id>>();
   private entries = new Map<Id, Entry>();
   private always = new Set<Id>();
@@ -44,6 +59,9 @@ export class TutorgoSpatialIndex {
     }
     this.lastNonce = nonce;
     const gen = ++this.gen;
+    const changes: IndexChange[] | null = TutorgoSpatialIndex.onSync
+      ? []
+      : null;
 
     for (let i = 0; i < elements.length; i++) {
       const el = elements[i];
@@ -60,14 +78,17 @@ export class TutorgoSpatialIndex {
       if (prev) {
         this.unlink(el.id, prev);
       }
-      const cells = this.cellsOf(el, elementsMap);
+      const bounds = getElementBounds(el, elementsMap);
+      const cells = this.cellsOf(el, bounds);
       this.entries.set(el.id, {
         version: el.version,
         versionNonce: el.versionNonce,
         cells,
+        bounds,
         order: i,
         gen,
       });
+      changes?.push({ id: el.id, prev: prev?.bounds ?? null, next: bounds });
       if (cells) {
         for (const key of cells) {
           let bucket = this.grid.get(key);
@@ -88,9 +109,19 @@ export class TutorgoSpatialIndex {
         if (entry.gen !== gen) {
           this.unlink(id, entry);
           this.entries.delete(id);
+          changes?.push({ id, prev: entry.bounds, next: null });
         }
       }
     }
+
+    if (changes?.length) {
+      TutorgoSpatialIndex.onSync?.(this, changes);
+    }
+  }
+
+  /** Последние известные индексу границы элемента; null — его нет в сцене. */
+  bounds(id: Id): Bounds | null {
+    return this.entries.get(id)?.bounds ?? null;
   }
 
   /** id элементов, чьи рамки МОГУТ пересекать прямоугольник сцены; плюс «всегда»-набор. */
@@ -187,13 +218,12 @@ export class TutorgoSpatialIndex {
   }
 
   /** Ключи ячеек под рамкой элемента; null — в «всегда»-набор. */
-  private cellsOf(el: ExcalidrawElement, elementsMap: ElementsMap) {
+  private cellsOf(el: ExcalidrawElement, [x1, y1, x2, y2]: Bounds) {
     // Рамка рисует подпись над собой — её видимость не равна пересечению с её
     // прямоугольником.
     if (isFrameLikeElement(el)) {
       return null;
     }
-    const [x1, y1, x2, y2] = getElementBounds(el, elementsMap);
     const cx1 = Math.floor(x1 / INDEX_CELL);
     const cx2 = Math.floor(x2 / INDEX_CELL);
     const cy1 = Math.floor(y1 / INDEX_CELL);
