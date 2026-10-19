@@ -13,11 +13,12 @@ import {
   tileKey,
   tileRange,
   tileSceneSize,
+  withLod,
 } from "../renderer/tutorgoTiles";
 import { Renderer } from "../scene/Renderer";
 import Scene from "../scene/Scene";
 import { TutorgoSpatialIndex } from "../scene/tutorgoIndex";
-import { HOT_BULK, HOT_MS, TILE_BUDGET } from "../tutorgo";
+import { HOT_BULK, HOT_MS, LOD_SIDE, TILE_BUDGET } from "../tutorgo";
 
 import type { StaticSceneRenderConfig } from "../scene/types";
 import type { NormalizedZoomValue, StaticCanvasAppState } from "../types";
@@ -348,7 +349,9 @@ describe("tutorgo: тайлы — рисование", () => {
   };
 
   const screenTiles = () =>
-    [0, 1].flatMap((tx) => [0, 1].map((ty) => T.store.tiles.get(tileKey(0, tx, ty))));
+    [0, 1].flatMap((tx) =>
+      [0, 1].map((ty) => T.store.tiles.get(tileKey(0, tx, ty))),
+    );
 
   beforeEach(() => T.setEnabled(true));
   afterEach(() => T.setEnabled(false));
@@ -377,6 +380,52 @@ describe("tutorgo: тайлы — рисование", () => {
     T.work(performance.now() + 1e9);
     mutateElement(els[7], { x: els[7].x + 5 }); // информирует сцену — новый nonce
     expect(frameOf(scene, renderer)?.map((el) => el.id)).toEqual([els[7].id]);
+  });
+
+  it("картинка: маленькая на тайле — копия LOD_SIDE, крупная и с кропом — полная", () => {
+    const img = new Image();
+    Object.defineProperty(img, "naturalWidth", { value: 2000 });
+    Object.defineProperty(img, "naturalHeight", { value: 1000 });
+    const page = (extra: Record<string, unknown> = {}) =>
+      ({
+        ...API.createElement({
+          type: "image",
+          x: 0,
+          y: 0,
+          width: 800,
+          height: 400,
+        }),
+        fileId: "f1",
+        status: "saved",
+        crop: null,
+        ...extra,
+      } as unknown as NonDeletedExcalidrawElement);
+    const renderConfig = {
+      imageCache: new Map([["f1", { image: img, mimeType: "image/jpeg" }]]),
+    } as any;
+    const source = (cfg: any) => cfg.imageCache.get("f1").image;
+
+    // 800 × 0,25 = 200 px на тайле ≤ LOD_SIDE — копия
+    const small = source(withLod(page(), renderConfig, 0.25));
+    expect(small).not.toBe(img);
+    expect(small.naturalWidth).toBe(LOD_SIDE);
+    expect(small.naturalHeight).toBe(LOD_SIDE / 2);
+    // та же копия на следующий раз — не пересоздаётся
+    expect(source(withLod(page(), renderConfig, 0.125))).toBe(small);
+    // 800 × 1 — полная
+    expect(source(withLod(page(), renderConfig, 1))).toBe(img);
+    // кроп в пикселях исходника — полная
+    const cropped = page({
+      crop: {
+        x: 0,
+        y: 0,
+        width: 10,
+        height: 10,
+        naturalWidth: 2000,
+        naturalHeight: 1000,
+      },
+    });
+    expect(source(withLod(cropped, renderConfig, 0.25))).toBe(img);
   });
 
   it("тёмная тема и экспорт — null", () => {

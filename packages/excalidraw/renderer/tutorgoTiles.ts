@@ -21,6 +21,7 @@ import { TutorgoSpatialIndex } from "../scene/tutorgoIndex";
 import {
   HOT_BULK,
   HOT_MS,
+  LOD_SIDE,
   TILES,
   TILE_BUDGET,
   TILE_EMPTY_BUDGET_MS,
@@ -372,11 +373,7 @@ export class TileStore {
     const b = this.index?.bounds(id);
     return (
       !!b &&
-      tileIntersects(
-        { level, tx, ty } as Tile,
-        b,
-        this.pads.get(id) ?? 0,
-      )
+      tileIntersects({ level, tx, ty } as Tile, b, this.pads.get(id) ?? 0)
     );
   }
 
@@ -635,7 +632,11 @@ const drawFallback = (
 };
 
 /** Живьём по состоянию: стираемые, кропаемая, картинки, чей файл ещё не готов. */
-const stateHotOf = ({ appState, renderConfig, elementsMap }: StaticSceneRenderConfig) => {
+const stateHotOf = ({
+  appState,
+  renderConfig,
+  elementsMap,
+}: StaticSceneRenderConfig) => {
   const ids = new Set<string>(renderConfig.elementsPendingErasure);
   if (appState.croppingElementId) {
     ids.add(appState.croppingElementId);
@@ -753,7 +754,10 @@ const ensurePump = () => {
 };
 
 /** Камера и конфиг рендера тайла: экспорт прямоугольника сцены в масштабе 2^L. */
-const tileView = (config: StaticSceneRenderConfig, { level, tx, ty }: TilePos) => {
+const tileView = (
+  config: StaticSceneRenderConfig,
+  { level, tx, ty }: TilePos,
+) => {
   const s = tileSceneSize(level);
   return {
     appState: {
@@ -774,6 +778,79 @@ const tileView = (config: StaticSceneRenderConfig, { level, tx, ty }: TilePos) =
   };
 };
 
+type LodCanvas = HTMLCanvasElement & {
+  naturalWidth: number;
+  naturalHeight: number;
+};
+
+// ponytail: копии живут, пока жива вкладка (~180 КБ на картинку, 330 страниц PDF ≈
+// 60 МБ); LRU или серверные /thumb вместо них — на шаге «полная версия».
+const lods = new Map<string, LodCanvas>();
+
+/**
+ * Уменьшенная копия картинки (длинная сторона LOD_SIDE): на дальнем уровне
+ * тайл рисует её, а не полный JPEG страницы. null — картинка и так не больше.
+ * naturalWidth/Height — их читает drawElementOnCanvas вместо размеров img.
+ */
+export const lodImage = (
+  fileId: string,
+  img: HTMLImageElement,
+): LodCanvas | null => {
+  const cached = lods.get(fileId);
+  if (cached) {
+    return cached;
+  }
+  const s = LOD_SIDE / Math.max(img.naturalWidth, img.naturalHeight);
+  if (!(s < 1)) {
+    return null;
+  }
+  const w = Math.max(1, Math.round(img.naturalWidth * s));
+  const h = Math.max(1, Math.round(img.naturalHeight * s));
+  const canvas = Object.assign(document.createElement("canvas"), {
+    naturalWidth: w,
+    naturalHeight: h,
+  });
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d")!;
+  ctx.imageSmoothingQuality = "high"; // иначе уменьшение в 8 раз — «лесенка»
+  ctx.drawImage(img, 0, 0, w, h);
+  lods.set(fileId, canvas);
+  return canvas;
+};
+
+/**
+ * Конфиг рендера с копией вместо полной картинки, если на тайле картинка не
+ * больше LOD_SIDE. Кроп задан в пикселях исходника — с копией не сойдётся.
+ */
+export const withLod = (
+  el: NonDeletedExcalidrawElement,
+  renderConfig: StaticCanvasRenderConfig,
+  k: number,
+): StaticCanvasRenderConfig => {
+  if (
+    !isInitializedImageElement(el) ||
+    el.crop ||
+    Math.max(el.width, el.height) * k > LOD_SIDE
+  ) {
+    return renderConfig;
+  }
+  const entry = renderConfig.imageCache.get(el.fileId);
+  if (!(entry?.image instanceof HTMLImageElement)) {
+    return renderConfig;
+  }
+  const lod = lodImage(el.fileId, entry.image);
+  if (!lod) {
+    return renderConfig;
+  }
+  return {
+    ...renderConfig,
+    imageCache: new Map([
+      [el.fileId, { ...entry, image: lod as unknown as HTMLImageElement }],
+    ]),
+  };
+};
+
 /** Тело цикла _renderStaticScene для одного элемента (без клипа рамкой: такие живые). */
 const paintOne = (
   el: NonDeletedExcalidrawElement,
@@ -782,6 +859,7 @@ const paintOne = (
   config: StaticSceneRenderConfig,
   appState: StaticCanvasAppState,
   renderConfig: StaticCanvasRenderConfig,
+  k: number,
 ) => {
   ctx.save();
   try {
@@ -791,7 +869,7 @@ const paintOne = (
       config.allElementsMap,
       rc,
       ctx,
-      renderConfig,
+      withLod(el, renderConfig, k),
       appState,
     );
     const text = getBoundTextElement(el, config.elementsMap);
@@ -867,7 +945,11 @@ const startJob = (
 };
 
 /** Рисует элементы работы до дедлайна; true — тайл готов. */
-const paintJob = (j: Job, config: StaticSceneRenderConfig, deadline: number) => {
+const paintJob = (
+  j: Job,
+  config: StaticSceneRenderConfig,
+  deadline: number,
+) => {
   const ctx = j.canvas.getContext("2d")!;
   const k = 2 ** j.level;
   ctx.setTransform(k, 0, 0, k, 0, 0);
@@ -878,7 +960,7 @@ const paintJob = (j: Job, config: StaticSceneRenderConfig, deadline: number) => 
     if (!el || store.isHot(id)) {
       continue;
     }
-    paintOne(el, ctx, j.rc, config, j.appState, j.renderConfig);
+    paintOne(el, ctx, j.rc, config, j.appState, j.renderConfig, k);
     j.maxOrder = Math.max(j.maxOrder, store.index!.order(id));
     if (performance.now() >= deadline) {
       break;
@@ -918,7 +1000,7 @@ const appendOne = (
   if (!rc) {
     roughOf.set(t.canvas, (rc = rough.canvas(t.canvas)));
   }
-  paintOne(el, ctx, rc, config, view.appState, view.renderConfig);
+  paintOne(el, ctx, rc, config, view.appState, view.renderConfig, k);
   return true;
 };
 
