@@ -815,7 +815,15 @@ export const renderElement = (
       // TODO investigate if we can do this in situ. Right now we need to call
       // beforehand because math helpers (such as getElementAbsoluteCoords)
       // rely on existing shapes
-      ShapeCache.generateElementShape(element, renderConfig);
+      // tutorgo: тайл рисуется веткой экспорта, но форма — из кэша: у не-iframe
+      // isExporting на форму не влияет, а перегенерация rough на каждый тайл
+      // дорогая и стирает кэш-холст элемента.
+      ShapeCache.generateElementShape(
+        element,
+        renderConfig.tutorgoTile
+          ? { ...renderConfig, isExporting: false }
+          : renderConfig,
+      );
       if (
         renderConfig.isExporting ||
         // tutorgo: эксперимент IMG_DIRECT — картинка мимо кэш-холста. Кроп в

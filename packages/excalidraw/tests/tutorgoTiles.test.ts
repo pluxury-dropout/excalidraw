@@ -1,14 +1,26 @@
 // tutorgo: тайлы статичного слоя (спека TutorGo 2026-10-15-board-tiled-rendering §3.1–3.2).
+import rough from "roughjs/bin/rough";
+
+import { getDefaultAppState } from "../appState";
+import { THEME } from "../constants";
 import { mutateElement } from "../element/mutateElement";
+import { syncInvalidIndices } from "../fractionalIndex";
 import {
   TileStore,
+  __tutorgoTilesForTests as T,
+  drawTutorgoTiles,
   levelFor,
   tileKey,
   tileRange,
   tileSceneSize,
 } from "../renderer/tutorgoTiles";
+import { Renderer } from "../scene/Renderer";
+import Scene from "../scene/Scene";
 import { TutorgoSpatialIndex } from "../scene/tutorgoIndex";
 import { HOT_BULK, HOT_MS, TILE_BUDGET } from "../tutorgo";
+
+import type { StaticSceneRenderConfig } from "../scene/types";
+import type { NormalizedZoomValue, StaticCanvasAppState } from "../types";
 
 import { API } from "./helpers/api";
 
@@ -264,5 +276,112 @@ describe("tutorgo: тайлы — учёт", () => {
     for (let i = 0; i < 10; i++) {
       expect(store.tiles.has(tileKey(0, i, 0))).toBe(true);
     }
+  });
+});
+
+describe("tutorgo: тайлы — рисование", () => {
+  const W = 1000;
+  const H = 800;
+
+  /** Кадр статичного слоя, как его строит StaticCanvas: Renderer → drawTutorgoTiles. */
+  const frameOf = (
+    scene: Scene,
+    renderer: Renderer,
+    patch: Partial<StaticCanvasAppState> = {},
+    isExporting = false,
+  ) => {
+    const appState = {
+      ...getDefaultAppState(),
+      width: W,
+      height: H,
+      offsetLeft: 0,
+      offsetTop: 0,
+      scrollX: 0,
+      scrollY: 0,
+      zoom: { value: 1 as NormalizedZoomValue },
+      ...patch,
+    } as StaticCanvasAppState;
+    const { elementsMap, visibleElements } = renderer.getRenderableElements({
+      zoom: appState.zoom,
+      offsetLeft: 0,
+      offsetTop: 0,
+      scrollX: appState.scrollX,
+      scrollY: appState.scrollY,
+      width: W,
+      height: H,
+      editingTextElement: null,
+      newElementId: undefined,
+      pendingImageElementId: null,
+      sceneNonce: scene.getSceneNonce(),
+    });
+    const canvas = document.createElement("canvas");
+    canvas.width = W;
+    canvas.height = H;
+    const config: StaticSceneRenderConfig = {
+      canvas,
+      rc: rough.canvas(canvas),
+      elementsMap,
+      allElementsMap: scene.getNonDeletedElementsMap(),
+      visibleElements,
+      scale: 1,
+      appState,
+      renderConfig: {
+        imageCache: new Map(),
+        isExporting,
+        renderGrid: false,
+        canvasBackgroundColor: "#ffffff",
+        embedsValidationStatus: new Map(),
+        elementsPendingErasure: new Set(),
+        pendingFlowchartNodes: null,
+      },
+    };
+    return drawTutorgoTiles(canvas.getContext("2d")!, config, W, H);
+  };
+
+  const makeScene = () => {
+    const els = Array.from({ length: 50 }, (_, i) =>
+      rect((i % 10) * 90, Math.floor(i / 10) * 150),
+    );
+    const scene = new Scene();
+    scene.replaceAllElements(syncInvalidIndices(els));
+    return { els, scene, renderer: new Renderer(scene) };
+  };
+
+  const screenTiles = () =>
+    [0, 1].flatMap((tx) => [0, 1].map((ty) => T.store.tiles.get(tileKey(0, tx, ty))));
+
+  beforeEach(() => T.setEnabled(true));
+  afterEach(() => T.setEnabled(false));
+
+  it("без флага — null и ни одного тайла", () => {
+    T.setEnabled(false);
+    const { scene, renderer } = makeScene();
+    expect(frameOf(scene, renderer)).toBe(null);
+    expect(T.store.tiles.size).toBe(0);
+  });
+
+  it("первый кадр — живых нет, тайлы в очереди; после насоса тайлы экрана свежие", () => {
+    const { scene, renderer } = makeScene();
+    expect(frameOf(scene, renderer)).toEqual([]);
+    expect(T.queueLength()).toBeGreaterThan(0);
+    T.work(performance.now() + 1e9);
+    expect(T.queueLength()).toBe(0);
+    for (const t of screenTiles()) {
+      expect(t && T.store.fresh(t)).toBe(true);
+    }
+  });
+
+  it("правка одного прямоугольника — живой только он", () => {
+    const { els, scene, renderer } = makeScene();
+    frameOf(scene, renderer);
+    T.work(performance.now() + 1e9);
+    mutateElement(els[7], { x: els[7].x + 5 }); // информирует сцену — новый nonce
+    expect(frameOf(scene, renderer)?.map((el) => el.id)).toEqual([els[7].id]);
+  });
+
+  it("тёмная тема и экспорт — null", () => {
+    const { scene, renderer } = makeScene();
+    expect(frameOf(scene, renderer, { theme: THEME.DARK })).toBe(null);
+    expect(frameOf(scene, renderer, {}, true)).toBe(null);
   });
 });

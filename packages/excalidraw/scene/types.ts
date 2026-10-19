@@ -35,6 +35,8 @@ export type StaticCanvasRenderConfig = {
   embedsValidationStatus: EmbedsValidationStatus;
   elementsPendingErasure: ElementsPendingErasure;
   pendingFlowchartNodes: PendingExcalidrawElements | null;
+  /** tutorgo: рисуется тайл (renderer/tutorgoTiles.ts) — ветка экспорта, форма из кэша. */
+  tutorgoTile?: boolean;
 };
 
 export type SVGRenderConfig = {

@@ -34,6 +34,7 @@ import { getBoundTextElement } from "../element/textElement";
 import { isElementLink } from "../element/elementLink";
 
 import { strokeTutorgoBackground } from "./tutorgoBackground";
+import { drawTutorgoTiles } from "./tutorgoTiles";
 
 const GridLineColor = {
   Bold: "#dddddd",
@@ -207,16 +208,18 @@ const renderLinkIcon = (
     context.restore();
   }
 };
-const _renderStaticScene = ({
-  canvas,
-  rc,
-  elementsMap,
-  allElementsMap,
-  visibleElements,
-  scale,
-  appState,
-  renderConfig,
-}: StaticSceneRenderConfig) => {
+// tutorgo: конфиг целиком нужен тайлам — деструктуризация в теле, visibleElements — let
+const _renderStaticScene = (config: StaticSceneRenderConfig) => {
+  const {
+    canvas,
+    rc,
+    elementsMap,
+    allElementsMap,
+    scale,
+    appState,
+    renderConfig,
+  } = config;
+  let { visibleElements } = config;
   if (canvas === null) {
     return;
   }
@@ -266,6 +269,18 @@ const _renderStaticScene = ({
       normalizedWidth / appState.zoom.value,
       normalizedHeight / appState.zoom.value,
     );
+  }
+
+  // tutorgo: тайлы (флаг tg-tiles) — готовые квадраты вместо элементов; дальше
+  // рисуются только живые (свежие правки, стираемые, рамки и т.п.).
+  const tiled = drawTutorgoTiles(
+    context,
+    config,
+    normalizedWidth,
+    normalizedHeight,
+  );
+  if (tiled) {
+    visibleElements = tiled;
   }
 
   const groupsToBeAddedToFrame = new Set<string>();

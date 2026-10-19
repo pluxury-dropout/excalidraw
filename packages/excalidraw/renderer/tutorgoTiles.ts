@@ -5,23 +5,46 @@
 //
 // Здесь — учёт: сетка уровней, какие тайлы устарели, какие элементы рисовать
 // живьём. Рисование и насос — ниже, в части «рисование».
+import rough from "roughjs/bin/rough";
+
+import { THEME } from "../constants";
+import { getBoundTextElement } from "../element/textElement";
 import {
   hasBoundTextElement,
   isArrowElement,
   isFrameLikeElement,
   isIframeLikeElement,
+  isInitializedImageElement,
   isTextElement,
 } from "../element/typeChecks";
-import { HOT_BULK, HOT_MS, TILE_BUDGET, TILE_PX } from "../tutorgo";
+import { TutorgoSpatialIndex } from "../scene/tutorgoIndex";
+import {
+  HOT_BULK,
+  HOT_MS,
+  TILES,
+  TILE_BUDGET,
+  TILE_EMPTY_BUDGET_MS,
+  TILE_FALLBACK_LEVELS,
+  TILE_FRAME_BUDGET_MS,
+  TILE_POOL,
+  TILE_PX,
+} from "../tutorgo";
 
-import { getCanvasPadding } from "./renderElement";
+import { getCanvasPadding, renderElement } from "./renderElement";
+import { renderStaticScene } from "./staticScene";
 
+import type { RoughCanvas } from "roughjs/bin/canvas";
+import type { Bounds, IndexChange } from "../scene/tutorgoIndex";
 import type {
-  Bounds,
-  IndexChange,
-  TutorgoSpatialIndex,
-} from "../scene/tutorgoIndex";
-import type { ElementsMap, ExcalidrawElement } from "../element/types";
+  StaticCanvasRenderConfig,
+  StaticSceneRenderConfig,
+} from "../scene/types";
+import type { StaticCanvasAppState } from "../types";
+import type {
+  ElementsMap,
+  ExcalidrawElement,
+  NonDeletedExcalidrawElement,
+} from "../element/types";
 
 type Id = ExcalidrawElement["id"];
 
@@ -344,6 +367,19 @@ export class TileStore {
     return false;
   }
 
+  /** Элемент с запасом задевает тайл — его стоит рисовать в этот тайл. */
+  touches(id: Id, level: number, tx: number, ty: number): boolean {
+    const b = this.index?.bounds(id);
+    return (
+      !!b &&
+      tileIntersects(
+        { level, tx, ty } as Tile,
+        b,
+        this.pads.get(id) ?? 0,
+      )
+    );
+  }
+
   invalidate(b: Bounds, pad: number, seq: number) {
     for (const t of this.tiles.values()) {
       if (tileIntersects(t, b, pad)) {
@@ -436,3 +472,499 @@ export class TileStore {
     this.contained.delete(id);
   }
 }
+
+// ─── рисование ───────────────────────────────────────────────────────────────
+
+type TilePos = { level: number; tx: number; ty: number };
+
+type Job = TilePos & {
+  canvas: HTMLCanvasElement;
+  rc: RoughCanvas;
+  elements: readonly NonDeletedExcalidrawElement[];
+  i: number;
+  seq: number;
+  maxOrder: number;
+  appState: StaticCanvasAppState;
+  renderConfig: StaticCanvasRenderConfig;
+};
+
+const store = new TileStore(() => performance.now());
+const pool: HTMLCanvasElement[] = [];
+const roughOf = new WeakMap<HTMLCanvasElement, RoughCanvas>();
+let enabled = false;
+let job: Job | null = null;
+let queue: TilePos[] = [];
+let lastConfig: StaticSceneRenderConfig | null = null;
+/** На экране есть тайл без холста и без заглушки — бюджет побольше. */
+let hole = false;
+let frame = 0;
+let raf = 0;
+
+const release = (canvases: readonly HTMLCanvasElement[]) => {
+  for (const c of canvases) {
+    if (pool.length < TILE_POOL) {
+      pool.push(c);
+    } else {
+      // освобождает память холста сразу, не дожидаясь GC
+      c.width = 0;
+      c.height = 0;
+    }
+  }
+};
+
+const abortJob = () => {
+  if (job) {
+    release([job.canvas]);
+    job = null;
+  }
+};
+
+const onSync: NonNullable<typeof TutorgoSpatialIndex.onSync> = (
+  index,
+  changes,
+  elementsMap,
+) => {
+  if (index !== store.index) {
+    // другая сцена: конфиг и работа — от старой страницы
+    abortJob();
+    lastConfig = null;
+    queue = [];
+  }
+  release(store.onIndexSync(index, changes, elementsMap));
+};
+
+// Шрифт догрузился — текст в тайлах нарисован запасным шрифтом.
+const onFontsLoaded = () => {
+  store.invalidateAll();
+  if (lastConfig) {
+    renderStaticScene(lastConfig);
+  }
+};
+
+const setEnabled = (on: boolean) => {
+  enabled = on;
+  TutorgoSpatialIndex.onSync = on ? onSync : null;
+  // тестовое окружение мокает document.fonts без событий
+  if (typeof document?.fonts?.addEventListener === "function") {
+    if (on) {
+      document.fonts.addEventListener("loadingdone", onFontsLoaded);
+    } else {
+      document.fonts.removeEventListener("loadingdone", onFontsLoaded);
+    }
+  }
+  if (!on) {
+    abortJob();
+    release(store.reset());
+    lastConfig = null;
+    queue = [];
+  }
+};
+
+if (TILES) {
+  setEnabled(true);
+}
+
+const applicable = ({ appState, renderConfig }: StaticSceneRenderConfig) =>
+  enabled &&
+  !renderConfig.isExporting &&
+  appState.theme !== THEME.DARK &&
+  appState.openDialog?.name !== "elementLinkSelector" &&
+  !appState.frameToHighlight;
+
+/** Прямоугольник тайла на экране в целых пикселях устройства: у соседей общий край — без швов. */
+const destRect = (
+  { level, tx, ty }: TilePos,
+  appState: StaticCanvasAppState,
+  f: number,
+) => {
+  const s = tileSceneSize(level);
+  const x1 = Math.round((tx * s + appState.scrollX) * f);
+  const y1 = Math.round((ty * s + appState.scrollY) * f);
+  const x2 = Math.round(((tx + 1) * s + appState.scrollX) * f);
+  const y2 = Math.round(((ty + 1) * s + appState.scrollY) * f);
+  return [x1, y1, x2 - x1, y2 - y1] as const;
+};
+
+/** Заглушка: кусок тайла грубее (растянут), поверх — тайлы детальнее, что есть. */
+const drawFallback = (
+  context: CanvasRenderingContext2D,
+  pos: TilePos,
+  appState: StaticCanvasAppState,
+  f: number,
+) => {
+  const [dx, dy, dw, dh] = destRect(pos, appState, f);
+  let found = false;
+  for (let p = 1; p <= TILE_FALLBACK_LEVELS && !found; p++) {
+    const n = 2 ** p;
+    const px = Math.floor(pos.tx / n);
+    const py = Math.floor(pos.ty / n);
+    const parent = store.tiles.get(tileKey(pos.level - p, px, py));
+    if (parent?.canvas) {
+      parent.lastUsed = frame;
+      const sub = TILE_PX / n;
+      context.drawImage(
+        parent.canvas,
+        (pos.tx - px * n) * sub,
+        (pos.ty - py * n) * sub,
+        sub,
+        sub,
+        dx,
+        dy,
+        dw,
+        dh,
+      );
+      found = true;
+    }
+  }
+  for (let i = 0; i < 2; i++) {
+    for (let j = 0; j < 2; j++) {
+      const child: TilePos = {
+        level: pos.level + 1,
+        tx: pos.tx * 2 + i,
+        ty: pos.ty * 2 + j,
+      };
+      const t = store.tiles.get(tileKey(child.level, child.tx, child.ty));
+      if (t?.canvas) {
+        t.lastUsed = frame;
+        context.drawImage(t.canvas, ...destRect(child, appState, f));
+        found = true;
+      }
+    }
+  }
+  return found;
+};
+
+/** Живьём по состоянию: стираемые, кропаемая, картинки, чей файл ещё не готов. */
+const stateHotOf = ({ appState, renderConfig, elementsMap }: StaticSceneRenderConfig) => {
+  const ids = new Set<string>(renderConfig.elementsPendingErasure);
+  if (appState.croppingElementId) {
+    ids.add(appState.croppingElementId);
+  }
+  for (const id of store.images) {
+    const el = elementsMap.get(id);
+    if (el && isInitializedImageElement(el)) {
+      const img = renderConfig.imageCache.get(el.fileId)?.image;
+      if (!img || img instanceof Promise) {
+        ids.add(id);
+      }
+    }
+  }
+  return ids;
+};
+
+/**
+ * Кадр статичного слоя из тайлов: композит готовых (или заглушек), очередь на
+ * дорисовку, живые элементы — вызывающему. null — тайлы неприменимы, рисовать
+ * по-старому.
+ */
+export const drawTutorgoTiles = (
+  context: CanvasRenderingContext2D,
+  config: StaticSceneRenderConfig,
+  normalizedWidth: number,
+  normalizedHeight: number,
+): readonly NonDeletedExcalidrawElement[] | null => {
+  if (!applicable(config)) {
+    return null;
+  }
+  lastConfig = config;
+  frame++;
+  const { appState, scale } = config;
+  const zoom = appState.zoom.value;
+  const f = zoom * scale;
+  const level = levelFor(zoom, scale);
+  const sx = -appState.scrollX;
+  const sy = -appState.scrollY;
+  const screen = tileRange(level, [
+    sx,
+    sy,
+    sx + normalizedWidth / zoom,
+    sy + normalizedHeight / zoom,
+  ]);
+  store.setStateHot(stateHotOf(config));
+
+  const cx = (screen.tx1 + screen.tx2) / 2;
+  const cy = (screen.ty1 + screen.ty2) / 2;
+  const need: (TilePos & { d: number })[] = [];
+  const ring: TilePos[] = [];
+  hole = false;
+
+  context.save();
+  context.setTransform(1, 0, 0, 1, 0, 0);
+  for (let tx = screen.tx1 - 1; tx <= screen.tx2 + 1; tx++) {
+    for (let ty = screen.ty1 - 1; ty <= screen.ty2 + 1; ty++) {
+      const pos = { level, tx, ty };
+      const t = store.tiles.get(tileKey(level, tx, ty));
+      const onScreen =
+        tx >= screen.tx1 &&
+        tx <= screen.tx2 &&
+        ty >= screen.ty1 &&
+        ty <= screen.ty2;
+      if (!onScreen) {
+        if (t) {
+          t.lastUsed = frame;
+        }
+        if (!t || !store.fresh(t)) {
+          ring.push(pos);
+        }
+        continue;
+      }
+      if (t?.canvas) {
+        t.lastUsed = frame;
+        context.drawImage(t.canvas, ...destRect(pos, appState, f));
+      } else if (!drawFallback(context, pos, appState, f)) {
+        hole = true;
+      }
+      if (!t || !store.fresh(t)) {
+        need.push({ ...pos, d: (tx - cx) ** 2 + (ty - cy) ** 2 });
+      }
+    }
+  }
+  context.restore();
+
+  need.sort((a, b) => a.d - b.d);
+  queue = [...need, ...ring];
+  if (
+    job &&
+    (job.level !== level ||
+      !queue.some((q) => q.tx === job!.tx && q.ty === job!.ty))
+  ) {
+    abortJob();
+  }
+  ensurePump();
+
+  return config.visibleElements.filter((el) => store.isLive(el.id, screen));
+};
+
+const ensurePump = () => {
+  if (
+    !raf &&
+    enabled &&
+    lastConfig &&
+    (job || queue.length || store.hasTimedHot())
+  ) {
+    raf = requestAnimationFrame(() => {
+      raf = 0;
+      work(
+        performance.now() +
+          (hole ? TILE_EMPTY_BUDGET_MS : TILE_FRAME_BUDGET_MS),
+      );
+    });
+  }
+};
+
+/** Камера и конфиг рендера тайла: экспорт прямоугольника сцены в масштабе 2^L. */
+const tileView = (config: StaticSceneRenderConfig, { level, tx, ty }: TilePos) => {
+  const s = tileSceneSize(level);
+  return {
+    appState: {
+      ...config.appState,
+      scrollX: -tx * s,
+      scrollY: -ty * s,
+      zoom: { value: 2 ** level / config.scale },
+    } as StaticCanvasAppState,
+    renderConfig: {
+      ...config.renderConfig,
+      isExporting: true,
+      tutorgoTile: true,
+      renderGrid: false,
+      embedsValidationStatus: new Map(),
+      elementsPendingErasure: new Set(),
+      pendingFlowchartNodes: null,
+    } as StaticCanvasRenderConfig,
+  };
+};
+
+/** Тело цикла _renderStaticScene для одного элемента (без клипа рамкой: такие живые). */
+const paintOne = (
+  el: NonDeletedExcalidrawElement,
+  ctx: CanvasRenderingContext2D,
+  rc: RoughCanvas,
+  config: StaticSceneRenderConfig,
+  appState: StaticCanvasAppState,
+  renderConfig: StaticCanvasRenderConfig,
+) => {
+  ctx.save();
+  try {
+    renderElement(
+      el,
+      config.elementsMap,
+      config.allElementsMap,
+      rc,
+      ctx,
+      renderConfig,
+      appState,
+    );
+    const text = getBoundTextElement(el, config.elementsMap);
+    if (text) {
+      renderElement(
+        text,
+        config.elementsMap,
+        config.allElementsMap,
+        rc,
+        ctx,
+        renderConfig,
+        appState,
+      );
+    }
+  } catch (error) {
+    console.error(error, el.id);
+  }
+  ctx.restore();
+};
+
+const takeCanvas = () => {
+  const canvas = pool.pop() ?? document.createElement("canvas");
+  if (canvas.width !== TILE_PX || canvas.height !== TILE_PX) {
+    canvas.width = TILE_PX; // заодно очищает
+    canvas.height = TILE_PX;
+  } else {
+    const ctx = canvas.getContext("2d")!;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, TILE_PX, TILE_PX);
+  }
+  let rc = roughOf.get(canvas);
+  if (!rc) {
+    roughOf.set(canvas, (rc = rough.canvas(canvas)));
+  }
+  return { canvas, rc };
+};
+
+const startJob = (
+  config: StaticSceneRenderConfig,
+  pos: TilePos,
+): Job | null => {
+  const index = store.index;
+  if (!index) {
+    return null;
+  }
+  const s = tileSceneSize(pos.level);
+  // запас: getCanvasPadding (до ~50) и сглаживание; точный отбор — touches
+  const m = 100 + 2 / 2 ** pos.level;
+  const x0 = pos.tx * s;
+  const y0 = pos.ty * s;
+  const elements = index
+    .candidates(x0 - m, y0 - m, x0 + s + m, y0 + s + m, config.elementsMap)
+    .filter(
+      (el) =>
+        // подпись рисует контейнер
+        !(
+          isTextElement(el) &&
+          el.containerId &&
+          config.elementsMap.has(el.containerId)
+        ) && store.touches(el.id, pos.level, pos.tx, pos.ty),
+    );
+  const { canvas, rc } = takeCanvas();
+  return {
+    ...pos,
+    ...tileView(config, pos),
+    canvas,
+    rc,
+    elements,
+    i: 0,
+    seq: store.seq,
+    maxOrder: -1,
+  };
+};
+
+/** Рисует элементы работы до дедлайна; true — тайл готов. */
+const paintJob = (j: Job, config: StaticSceneRenderConfig, deadline: number) => {
+  const ctx = j.canvas.getContext("2d")!;
+  const k = 2 ** j.level;
+  ctx.setTransform(k, 0, 0, k, 0, 0);
+  while (j.i < j.elements.length) {
+    const id = j.elements[j.i++].id;
+    // свежая версия элемента: объект в сцене могли заменить, пока шла работа
+    const el = config.elementsMap.get(id);
+    if (!el || store.isHot(id)) {
+      continue;
+    }
+    paintOne(el, ctx, j.rc, config, j.appState, j.renderConfig);
+    j.maxOrder = Math.max(j.maxOrder, store.index!.order(id));
+    if (performance.now() >= deadline) {
+      break;
+    }
+  }
+  return j.i >= j.elements.length;
+};
+
+const commit = (j: Job) => {
+  const t = store.tile(j.level, j.tx, j.ty);
+  const old = t.canvas;
+  t.canvas = j.canvas;
+  t.contentSeq = j.seq;
+  t.maxOrder = j.maxOrder;
+  t.lastUsed = frame;
+  if (old) {
+    release([old]);
+  }
+  release(store.evict(frame));
+};
+
+/** Дорисовать остывший элемент поверх готового тайла. */
+const appendOne = (
+  t: Tile,
+  id: string,
+  config: StaticSceneRenderConfig,
+): boolean => {
+  const el = config.elementsMap.get(id);
+  if (!el || !t.canvas) {
+    return false;
+  }
+  const ctx = t.canvas.getContext("2d")!;
+  const k = 2 ** t.level;
+  ctx.setTransform(k, 0, 0, k, 0, 0);
+  const view = tileView(config, t);
+  let rc = roughOf.get(t.canvas);
+  if (!rc) {
+    roughOf.set(t.canvas, (rc = rough.canvas(t.canvas)));
+  }
+  paintOne(el, ctx, rc, config, view.appState, view.renderConfig);
+  return true;
+};
+
+/** Шаг насоса: остывание, дорисовки, тайлы из очереди до дедлайна. */
+const work = (deadline: number) => {
+  const config = lastConfig;
+  if (!config || !enabled) {
+    return;
+  }
+  let dirty = false;
+  for (const id of store.tick()) {
+    store.bake(id, (t) => appendOne(t, id, config));
+    dirty = true;
+  }
+  while (performance.now() < deadline) {
+    if (!job) {
+      let next: TilePos | undefined;
+      while ((next = queue.shift())) {
+        const t = store.tiles.get(tileKey(next.level, next.tx, next.ty));
+        if (!t || !store.fresh(t)) {
+          break;
+        }
+      }
+      job = next ? startJob(config, next) : null;
+      if (!job) {
+        break;
+      }
+    }
+    if (paintJob(job, config, deadline)) {
+      commit(job);
+      job = null;
+      dirty = true;
+    }
+  }
+  if (dirty) {
+    renderStaticScene(config); // композит заново: новые тайлы, остывшие — в них
+  }
+  ensurePump();
+};
+
+export const tutorgoTilesInvalidateAll = onFontsLoaded;
+
+/** Только для тестов: включить без localStorage и прогнать насос синхронно. */
+export const __tutorgoTilesForTests = {
+  store,
+  setEnabled,
+  work,
+  queueLength: () => queue.length + (job ? 1 : 0),
+};
