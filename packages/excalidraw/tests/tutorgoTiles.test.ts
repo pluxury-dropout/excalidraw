@@ -51,7 +51,8 @@ const setup = (els: NonDeletedExcalidrawElement[]) => {
   let nonce = 0;
   let scene = els;
   const sync = (next: NonDeletedExcalidrawElement[] = scene) => {
-    scene = next;
+    // дробные индексы (z-порядок) — как у элементов настоящей сцены
+    scene = syncInvalidIndices(next) as NonDeletedExcalidrawElement[];
     TutorgoSpatialIndex.onSync = (i, c, m) => store.onIndexSync(i, c, m);
     index.sync(scene, mapOf(scene), ++nonce);
     TutorgoSpatialIndex.onSync = null;
@@ -61,7 +62,7 @@ const setup = (els: NonDeletedExcalidrawElement[]) => {
     const t = store.tile(0, tx, ty);
     t.canvas = document.createElement("canvas");
     t.contentSeq = store.seq;
-    t.maxOrder = scene.length - 1;
+    t.maxIndex = scene.length ? scene[scene.length - 1].index : null;
     return t;
   };
   const advance = (ms: number) => {
@@ -193,18 +194,60 @@ describe("tutorgo: тайлы — учёт", () => {
     store.tick();
     // правки инвалидировали тайл; «перерисовали» без них (горячие исключены)
     t.contentSeq = store.seq;
-    t.maxOrder = -1;
+    t.maxIndex = null;
     expect(store.canAppend(t, low.id)).toBe(true);
-    t.maxOrder = 1;
+    t.maxIndex = top.index;
     expect(store.canAppend(t, low.id)).toBe(false);
-    expect(store.canAppend(t, top.id)).toBe(false); // order 1 не выше maxOrder 1
+    expect(store.canAppend(t, top.id)).toBe(false); // не выше самого себя
 
-    t.maxOrder = 0;
+    t.maxIndex = low.index;
     let appended = 0;
     store.bake(top.id, () => ++appended > 0);
     expect(appended).toBe(1);
     expect(store.fresh(t)).toBe(true);
-    expect(t.maxOrder).toBe(1);
+    expect(t.maxIndex).toBe(top.index);
+  });
+
+  it("перетаскивание больше HOT_BULK элементов — правки, живьём", () => {
+    const many = Array.from({ length: HOT_BULK + 1 }, (_, i) =>
+      rect((i % 50) * 10, Math.floor(i / 50) * 10),
+    );
+    const { store, sync } = setup(many);
+    for (const el of many) {
+      mutateElement(el, { x: el.x + 5 });
+    }
+    sync();
+    expect(many.every((el) => store.isLive(el.id, screen))).toBe(true);
+  });
+
+  it("всегда живой после остывания в тайл не дорисовывается", () => {
+    const linked = {
+      ...rect(10, 10),
+      link: "https://example.com",
+    } as NonDeletedExcalidrawElement;
+    const { store, sync, paint, advance } = setup([linked]);
+    const t = paint(0, 0);
+    const moved = { ...linked, x: 20, version: linked.version + 1 };
+    sync([moved as NonDeletedExcalidrawElement]);
+    advance(HOT_MS);
+    store.tick();
+    t.contentSeq = store.seq;
+    let appended = 0;
+    store.bake(linked.id, () => ++appended > 0);
+    expect(appended).toBe(0);
+    expect(store.isLive(linked.id, screen)).toBe(true);
+  });
+
+  it("остывшая правка вне экрана не копится в учёте", () => {
+    const far = rect(100_000, 100_000);
+    const { store, sync, advance } = setup([far]);
+    store.screen = screen;
+    mutateElement(far, { x: 100_010 });
+    sync();
+    advance(HOT_MS);
+    store.tick();
+    store.bake(far.id, () => false);
+    expect((store as any).recent.size).toBe(0);
   });
 
   it("картинка без файла живая, с файлом — тайлы по её границам перерисовать", () => {
@@ -426,6 +469,66 @@ describe("tutorgo: тайлы — рисование", () => {
       },
     });
     expect(source(withLod(cropped, renderConfig, 0.25))).toBe(img);
+  });
+
+  it("правка во время отрисовки тайла его инвалидирует (заготовка в учёте)", () => {
+    const { els, scene, renderer } = makeScene();
+    frameOf(scene, renderer);
+    // часы идут на 1 мс за вызов: работа начнётся и прервётся после элемента
+    let t = 0;
+    const spy = vi.spyOn(performance, "now").mockImplementation(() => t++);
+    T.work(2);
+    spy.mockRestore();
+    expect(T.queueLength()).toBeGreaterThan(0);
+    const draft = [...T.store.tiles.values()].find((tile) => !tile.canvas);
+    expect(draft).toBeDefined();
+    const before = draft!.invalidSeq;
+    mutateElement(els[0], { isDeleted: true }); // ученик стёр, пока тайл рисуется
+    frameOf(scene, renderer);
+    expect(draft!.invalidSeq).toBeGreaterThan(before);
+  });
+
+  it("пустая новая страница — тайлы прошлой сброшены", () => {
+    const { scene, renderer } = makeScene();
+    frameOf(scene, renderer);
+    T.work(performance.now() + 1e9);
+    expect(T.store.tiles.size).toBeGreaterThan(0);
+    const empty = new Scene();
+    frameOf(empty, new Renderer(empty));
+    expect(T.store.tiles.size).toBe(0);
+  });
+
+  it("после кадра в тёмной теме насос не дорисовывает старый кадр", () => {
+    const { scene, renderer } = makeScene();
+    frameOf(scene, renderer);
+    frameOf(scene, renderer, { theme: THEME.DARK });
+    T.work(performance.now() + 1e9);
+    expect([...T.store.tiles.values()].some((tile) => tile.canvas)).toBe(false);
+  });
+
+  it("Renderer.destroy (уход с доски) — тайлы освобождены", () => {
+    const { scene, renderer } = makeScene();
+    frameOf(scene, renderer);
+    T.work(performance.now() + 1e9);
+    renderer.destroy();
+    expect(T.store.tiles.size).toBe(0);
+    expect(T.queueLength()).toBe(0);
+  });
+
+  it("редактируемый текст и рисуемый элемент — горячие, пока в состоянии", () => {
+    const { els, scene, renderer } = makeScene();
+    frameOf(scene, renderer);
+    T.work(performance.now() + 1e9);
+    frameOf(scene, renderer, {
+      editingTextElement: els[1] as any,
+      newElement: els[2] as any,
+    });
+    expect(T.store.isHot(els[1].id)).toBe(true);
+    expect(T.store.isHot(els[2].id)).toBe(true);
+    frameOf(scene, renderer);
+    T.work(performance.now() + 1e9); // остыли и запеклись
+    expect(T.store.isHot(els[1].id)).toBe(false);
+    expect(T.store.isHot(els[2].id)).toBe(false);
   });
 
   it("тёмная тема и экспорт — null", () => {

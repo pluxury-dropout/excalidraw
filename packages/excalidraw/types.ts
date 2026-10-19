@@ -189,6 +189,10 @@ export type StaticCanvasAppState = Readonly<
     croppingElementId: AppState["croppingElementId"];
     // tutorgo: необязательно — экспорт собирает этот тип сам и узор не рисует.
     tutorgoBackground?: AppState["tutorgoBackground"];
+    // tutorgo: тайлы держат их в горячем слое (renderer/tutorgoTiles.ts);
+    // StaticCanvas получает весь AppState, экспорт их не передаёт.
+    editingTextElement?: AppState["editingTextElement"];
+    newElement?: AppState["newElement"];
   }
 >;
 

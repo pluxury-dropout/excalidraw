@@ -7,6 +7,7 @@ import type {
 } from "../element/types";
 import { renderInteractiveSceneThrottled } from "../renderer/interactiveScene";
 import { renderStaticSceneThrottled } from "../renderer/staticScene";
+import { tutorgoTilesReset } from "../renderer/tutorgoTiles";
 
 import type { AppState } from "../types";
 // tutorgo: + viewportCoordsToSceneCoords — прямоугольник вьюпорта для индекса
@@ -185,5 +186,7 @@ export class Renderer {
     renderInteractiveSceneThrottled.cancel();
     renderStaticSceneThrottled.cancel();
     this.getRenderableElements.clear();
+    // tutorgo: модульный кэш тайлов держит до TILE_BUDGET холстов и старую сцену
+    tutorgoTilesReset();
   }
 }

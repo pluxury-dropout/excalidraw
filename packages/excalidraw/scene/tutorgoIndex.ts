@@ -118,7 +118,9 @@ export class TutorgoSpatialIndex {
       }
     }
 
-    if (changes?.length) {
+    // Первый проход зовёт хук и без изменений: пустая страница — тоже новая
+    // сцена, иначе тайлы показали бы предыдущую.
+    if (changes && (changes.length || gen === 1)) {
       TutorgoSpatialIndex.onSync?.(this, changes, elementsMap);
     }
   }

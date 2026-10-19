@@ -69,8 +69,11 @@ export type Tile = {
   contentSeq: number;
   /** seq последней правки, задевшей тайл. */
   invalidSeq: number;
-  /** Самый верхний по z нарисованный элемент — для дорисовки поверх. */
-  maxOrder: number;
+  /**
+   * Дробный индекс (element.index) самого верхнего нарисованного элемента —
+   * для дорисовки поверх. Не позиция в массиве: та сдвигается при undo удаления.
+   */
+  maxIndex: string | null;
   /** Номер кадра, когда тайл последний раз был нужен на экране. */
   lastUsed: number;
 };
@@ -155,8 +158,12 @@ export class TileStore {
   private pads = new Map<Id, number>();
   /** Контейнеры с подписью: дорисовка поверх их не рисует — только перерисовка. */
   private withText = new Set<Id>();
-  /** Подписи с контейнером: рисуются контейнером, сами не запекаются. */
-  private contained = new Set<Id>();
+  /** Подпись → её контейнер: рисуется контейнером, сама не запекается. */
+  private containerOf = new Map<Id, Id>();
+  /** Дробный индекс элемента (z-порядок) на последнем sync. */
+  private zIndex = new Map<Id, string | null>();
+  /** Экран последнего кадра: недавние правки за его пределами не копятся. */
+  screen: TileRect | null = null;
 
   constructor(private now: () => number) {}
 
@@ -174,9 +181,11 @@ export class TileStore {
     this.alwaysLive.clear();
     this.pads.clear();
     this.withText.clear();
-    this.contained.clear();
+    this.containerOf.clear();
+    this.zIndex.clear();
     this.images.clear();
     this.index = null;
+    this.screen = null;
     return freed;
   }
 
@@ -190,7 +199,15 @@ export class TileStore {
     const isNew = index !== this.index;
     const freed = isNew ? this.reset() : [];
     this.index = index;
-    const bulk = isNew || changes.length > HOT_BULK;
+    // Массовая — по новым элементам (сид, импорт, вставка): перетаскивание
+    // большого выделения — правки, им место в горячем слое.
+    let added = 0;
+    for (const c of changes) {
+      if (!c.prev) {
+        added++;
+      }
+    }
+    const bulk = isNew || added > HOT_BULK;
 
     for (const c of changes) {
       const el = c.next ? elementsMap.get(c.id) : undefined;
@@ -271,12 +288,23 @@ export class TileStore {
   bake(id: Id, append: (tile: Tile) => boolean) {
     const r = this.recent.get(id);
     const b = this.index?.bounds(id);
-    // подпись запекается вместе с контейнером (его правка помечена в onIndexSync)
-    if (!r || !b || this.contained.has(id)) {
-      this.recent.delete(id);
+    const container = this.containerOf.get(id);
+    if (
+      !r ||
+      !b ||
+      // всегда-живой в тайл не идёт (иначе нарисован дважды)
+      this.alwaysLive.has(id) ||
+      // подпись запекается вместе с контейнером (его правка помечена в
+      // onIndexSync) — если контейнер есть; висячая рисуется сама
+      (container && this.index!.bounds(container))
+    ) {
+      if (r && !r.hot) {
+        this.recent.delete(id);
+      }
       return;
     }
     const pad = this.pads.get(id) ?? 0;
+    const zi = this.zIndex.get(id) ?? null;
     for (const t of this.tiles.values()) {
       if (!tileIntersects(t, b, pad)) {
         continue;
@@ -284,20 +312,40 @@ export class TileStore {
       if (this.canAppend(t, id) && append(t)) {
         t.contentSeq = r.changeSeq;
         t.invalidSeq = r.changeSeq;
-        t.maxOrder = this.index!.order(id);
+        t.maxIndex = zi;
       } else {
         t.invalidSeq = Math.max(t.invalidSeq, r.changeSeq);
+      }
+    }
+    // Вне экрана — забываем: тайлы там уже помечены устаревшими, а учёт
+    // недавних не должен расти весь урок, пока ученик рисует в стороне.
+    const s = this.screen;
+    if (s) {
+      const range = tileRange(s.level, b);
+      if (
+        range.tx2 < s.tx1 ||
+        range.tx1 > s.tx2 ||
+        range.ty2 < s.ty1 ||
+        range.ty1 > s.ty2
+      ) {
+        this.recent.delete(id);
       }
     }
   }
 
   canAppend(t: Tile, id: Id): boolean {
+    const zi = this.zIndex.get(id);
     return (
       this.fresh(t) &&
-      !!this.index &&
-      this.index.order(id) > t.maxOrder &&
+      !!zi &&
+      (t.maxIndex === null || zi > t.maxIndex) &&
       !this.withText.has(id)
     );
+  }
+
+  /** Дробный индекс элемента для maxIndex тайла. */
+  zIndexOf(id: Id): string | null {
+    return this.zIndex.get(id) ?? null;
   }
 
   fresh(t: Tile): boolean {
@@ -405,7 +453,7 @@ export class TileStore {
         canvas: null,
         contentSeq: -1,
         invalidSeq: 0,
-        maxOrder: -1,
+        maxIndex: null,
         lastUsed: 0,
       };
       this.tiles.set(key, t);
@@ -457,7 +505,12 @@ export class TileStore {
     toggle(this.alwaysLive, el.id, isAlwaysLive(el));
     toggle(this.images, el.id, el.type === "image");
     toggle(this.withText, el.id, hasBoundTextElement(el));
-    toggle(this.contained, el.id, isTextElement(el) && !!el.containerId);
+    if (isTextElement(el) && el.containerId) {
+      this.containerOf.set(el.id, el.containerId);
+    } else {
+      this.containerOf.delete(el.id);
+    }
+    this.zIndex.set(el.id, el.index);
   }
 
   private forget(id: Id) {
@@ -466,7 +519,8 @@ export class TileStore {
     this.images.delete(id);
     this.pads.delete(id);
     this.withText.delete(id);
-    this.contained.delete(id);
+    this.containerOf.delete(id);
+    this.zIndex.delete(id);
   }
 }
 
@@ -480,7 +534,7 @@ type Job = TilePos & {
   elements: readonly NonDeletedExcalidrawElement[];
   i: number;
   seq: number;
-  maxOrder: number;
+  maxIndex: string | null;
   appState: StaticCanvasAppState;
   renderConfig: StaticCanvasRenderConfig;
 };
@@ -512,7 +566,24 @@ const release = (canvases: readonly HTMLCanvasElement[]) => {
 const abortJob = () => {
   if (job) {
     release([job.canvas]);
+    // заготовка без холста (startJob) больше никому не нужна
+    const key = tileKey(job.level, job.tx, job.ty);
+    if (!store.tiles.get(key)?.canvas) {
+      store.tiles.delete(key);
+    }
     job = null;
+  }
+};
+
+/** Всё забыть: тайлы, работу, конфиг (уход с доски, флаг выключен). */
+const resetAll = () => {
+  abortJob();
+  release(store.reset());
+  lastConfig = null;
+  queue = [];
+  if (raf) {
+    cancelAnimationFrame(raf);
+    raf = 0;
   }
 };
 
@@ -550,10 +621,7 @@ const setEnabled = (on: boolean) => {
     }
   }
   if (!on) {
-    abortJob();
-    release(store.reset());
-    lastConfig = null;
-    queue = [];
+    resetAll();
   }
 };
 
@@ -563,6 +631,9 @@ if (TILES) {
 
 const applicable = ({ appState, renderConfig }: StaticSceneRenderConfig) =>
   enabled &&
+  // индекс ещё не пришёл (сброс без новой синхронизации) — тайлам не из чего
+  // рисовать, пустой холст хуже старого пути
+  !!store.index &&
   !renderConfig.isExporting &&
   appState.theme !== THEME.DARK &&
   appState.openDialog?.name !== "elementLinkSelector" &&
@@ -631,15 +702,30 @@ const drawFallback = (
   return found;
 };
 
-/** Живьём по состоянию: стираемые, кропаемая, картинки, чей файл ещё не готов. */
+/**
+ * Живьём по состоянию: стираемые, кропаемая, редактируемый текст (и его
+ * контейнер), рисуемый элемент, вставляемая картинка, картинки без файла.
+ * Редактируемого и рисуемого нет в elementsMap — запечь их можно только после
+ * выхода из состояния, иначе тайл перерисуется без них, а учёт их забудет.
+ */
 const stateHotOf = ({
   appState,
   renderConfig,
   elementsMap,
 }: StaticSceneRenderConfig) => {
   const ids = new Set<string>(renderConfig.elementsPendingErasure);
-  if (appState.croppingElementId) {
-    ids.add(appState.croppingElementId);
+  for (const id of [
+    appState.croppingElementId,
+    appState.editingTextElement?.id,
+    appState.editingTextElement?.type === "text"
+      ? appState.editingTextElement.containerId
+      : null,
+    appState.newElement?.id,
+    appState.pendingImageElementId,
+  ]) {
+    if (id) {
+      ids.add(id);
+    }
   }
   for (const id of store.images) {
     const el = elementsMap.get(id);
@@ -665,6 +751,12 @@ export const drawTutorgoTiles = (
   normalizedHeight: number,
 ): readonly NonDeletedExcalidrawElement[] | null => {
   if (!applicable(config)) {
+    // экспорт рисует на свой холст — тайлам не мешает; иначе (тёмная тема и
+    // т.п.) насос не должен дорисовывать устаревший кадр поверх обычного
+    if (!config.renderConfig.isExporting && lastConfig) {
+      abortJob();
+      lastConfig = null;
+    }
     return null;
   }
   lastConfig = config;
@@ -681,6 +773,7 @@ export const drawTutorgoTiles = (
     sx + normalizedWidth / zoom,
     sy + normalizedHeight / zoom,
   ]);
+  store.screen = screen;
   store.setStateHot(stateHotOf(config));
 
   const cx = (screen.tx1 + screen.tx2) / 2;
@@ -931,6 +1024,11 @@ const startJob = (
           config.elementsMap.has(el.containerId)
         ) && store.touches(el.id, pos.level, pos.tx, pos.ty),
     );
+  // Заготовка в учёте с первого кадра работы: правки, пришедшие, пока тайл
+  // рисуется, должны его инвалидировать — иначе коммит сочтёт тайл свежим с
+  // призраком удалённого внутри.
+  const t = store.tile(pos.level, pos.tx, pos.ty);
+  t.lastUsed = frame;
   const { canvas, rc } = takeCanvas();
   return {
     ...pos,
@@ -940,7 +1038,7 @@ const startJob = (
     elements,
     i: 0,
     seq: store.seq,
-    maxOrder: -1,
+    maxIndex: null,
   };
 };
 
@@ -961,7 +1059,10 @@ const paintJob = (
       continue;
     }
     paintOne(el, ctx, j.rc, config, j.appState, j.renderConfig, k);
-    j.maxOrder = Math.max(j.maxOrder, store.index!.order(id));
+    const zi = store.zIndexOf(id);
+    if (zi && (j.maxIndex === null || zi > j.maxIndex)) {
+      j.maxIndex = zi;
+    }
     if (performance.now() >= deadline) {
       break;
     }
@@ -974,7 +1075,7 @@ const commit = (j: Job) => {
   const old = t.canvas;
   t.canvas = j.canvas;
   t.contentSeq = j.seq;
-  t.maxOrder = j.maxOrder;
+  t.maxIndex = j.maxIndex;
   t.lastUsed = frame;
   if (old) {
     release([old]);
@@ -1036,12 +1137,15 @@ const work = (deadline: number) => {
     }
   }
   if (dirty) {
-    renderStaticScene(config); // композит заново: новые тайлы, остывшие — в них
+    // Композит заново: новые тайлы, остывшие — в них. Без троттла: троттл хранит
+    // последние аргументы, и наш config перебил бы более свежий кадр React.
+    renderStaticScene(config);
   }
   ensurePump();
 };
 
-export const tutorgoTilesInvalidateAll = onFontsLoaded;
+/** Уход с доски (Renderer.destroy): холсты тайлов и старая сцена не держатся. */
+export const tutorgoTilesReset = resetAll;
 
 /** Только для тестов: включить без localStorage и прогнать насос синхронно. */
 export const __tutorgoTilesForTests = {
