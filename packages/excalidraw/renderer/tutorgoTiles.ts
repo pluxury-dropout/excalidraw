@@ -33,8 +33,6 @@ import {
   TILE_PX,
 } from "../tutorgo";
 
-import { isTestEnv } from "../utils";
-
 import { getCanvasPadding, renderElement } from "./renderElement";
 import { renderStaticScene } from "./staticScene";
 
