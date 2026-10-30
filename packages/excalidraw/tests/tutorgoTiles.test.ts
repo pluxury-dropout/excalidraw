@@ -399,7 +399,7 @@ describe("tutorgo: тайлы — рисование", () => {
   beforeEach(() => T.setEnabled(true));
   afterEach(() => T.setEnabled(false));
 
-  it("без флага — null и ни одного тайла", () => {
+  it("выключено (setEnabled(false)) — null и ни одного тайла", () => {
     T.setEnabled(false);
     const { scene, renderer } = makeScene();
     expect(frameOf(scene, renderer)).toBe(null);

@@ -22,7 +22,6 @@ import {
   HOT_BULK,
   HOT_MS,
   LOD_SIDE,
-  TILES,
   TILE_BUDGET,
   TILE_EMPTY_BUDGET_MS,
   TILE_FALLBACK_LEVELS,
@@ -30,6 +29,8 @@ import {
   TILE_POOL,
   TILE_PX,
 } from "../tutorgo";
+
+import { isTestEnv } from "../utils";
 
 import { getCanvasPadding, renderElement } from "./renderElement";
 import { renderStaticScene } from "./staticScene";
@@ -625,7 +626,9 @@ const setEnabled = (on: boolean) => {
   }
 };
 
-if (TILES) {
+// Включено у всех, кроме тестовой среды форка: апстримные тесты остаются на
+// старом пути отрисовки, тайловые включают флаг сами.
+if (!isTestEnv()) {
   setEnabled(true);
 }
 

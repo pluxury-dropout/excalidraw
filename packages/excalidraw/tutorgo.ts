@@ -174,22 +174,12 @@ export const INDEX_CELL = 1024;
 export const INDEX_MAX_CELLS = 256;
 
 /**
- * ПРОТОТИП тайлов (renderer/tutorgoTiles.ts, спека TutorGo
- * 2026-10-15-board-tiled-rendering §3.1–3.2, план 2026-10-19-board-tiles-prototype):
- * статичный слой — готовые квадраты-битмапы вместо всех видимых элементов.
- * Включается только при `localStorage["tg-tiles"] = "1"` после перезагрузки —
- * инструмент замера; готовое включается у всех, флаг удаляется.
+ * Тайлы (renderer/tutorgoTiles.ts, спека TutorGo
+ * 2026-10-15-board-tiled-rendering §3.1–3.2): статичный слой — готовые
+ * квадраты-битмапы вместо всех видимых элементов. Включены у всех; выключены
+ * только в тестовой среде форка (апстримные тесты остаются на старом пути,
+ * тайловые включают сами через `__tutorgoTilesForTests.setEnabled`).
  */
-export const TILES = (() => {
-  try {
-    return (
-      typeof localStorage !== "undefined" &&
-      localStorage.getItem("tg-tiles") === "1"
-    );
-  } catch {
-    return false;
-  }
-})();
 /** Сторона тайла в пикселях устройства. */
 export const TILE_PX = 512;
 /** Время на отрисовку тайлов за кадр (60 Гц — 16,7 мс на всё). */
@@ -208,24 +198,3 @@ export const HOT_BULK = 500;
 export const TILE_FALLBACK_LEVELS = 3;
 /** Длинная сторона уменьшенной копии картинки для дальних уровней. */
 export const LOD_SIDE = 256;
-
-/**
- * ЭКСПЕРИМЕНТ (спека TutorGo 2026-10-14-board-render-performance, §3.6, вопрос 1):
- * картинки рисуются прямо на основной холст — веткой экспорта, мимо кэш-холстов
- * элементов. Проверяем гипотезу «длинные кадры пана — это drawImage из сотен
- * кэш-холстов, вытесненных из видеопамяти».
- *
- * Включается только в браузере, где `localStorage["tg-img-direct"] = "1"`, после
- * перезагрузки вкладки; у всех остальных — поведение апстрима. Удалить или
- * превратить в постоянное поведение по итогам замера.
- */
-export const IMG_DIRECT = (() => {
-  try {
-    return (
-      typeof localStorage !== "undefined" &&
-      localStorage.getItem("tg-img-direct") === "1"
-    );
-  } catch {
-    return false;
-  }
-})();
