@@ -3,15 +3,19 @@ import rough from "roughjs/bin/rough";
 
 import { getDefaultAppState } from "../appState";
 import { THEME } from "../constants";
+import { getElementBounds } from "../element/bounds";
 import { mutateElement } from "../element/mutateElement";
 import { syncInvalidIndices } from "../fractionalIndex";
+import { getCanvasPadding } from "../renderer/renderElement";
 import {
   TileStore,
   __tutorgoTilesForTests as T,
   drawTutorgoTiles,
   levelFor,
   lodImage,
+  paintTile,
   tileBudget,
+  tileElementsOf,
   tileKey,
   tileRange,
   tileSceneSize,
@@ -27,6 +31,7 @@ import {
   LOD_SIDE,
   TILE_BUDGET,
   TILE_BUDGET_IOS,
+  TILE_PX,
 } from "../tutorgo";
 
 import type { StaticSceneRenderConfig } from "../scene/types";
@@ -395,15 +400,15 @@ describe("tutorgo: тайлы — рисование", () => {
   const W = 1000;
   const H = 800;
 
-  /** Кадр статичного слоя, как его строит StaticCanvas: Renderer → drawTutorgoTiles. */
-  const frameOf = (
+  /** Конфиг кадра статичного слоя, как его строит StaticCanvas через Renderer. */
+  const configOf = (
     scene: Scene,
     renderer: Renderer,
     patch: Partial<StaticCanvasAppState> = {},
     isExporting = false,
     w = W,
     h = H,
-  ) => {
+  ): StaticSceneRenderConfig => {
     const appState = {
       ...getDefaultAppState(),
       width: w,
@@ -431,7 +436,7 @@ describe("tutorgo: тайлы — рисование", () => {
     const canvas = document.createElement("canvas");
     canvas.width = w;
     canvas.height = h;
-    const config: StaticSceneRenderConfig = {
+    return {
       canvas,
       rc: rough.canvas(canvas),
       elementsMap,
@@ -449,7 +454,19 @@ describe("tutorgo: тайлы — рисование", () => {
         pendingFlowchartNodes: null,
       },
     };
-    return drawTutorgoTiles(canvas.getContext("2d")!, config, w, h);
+  };
+
+  /** Кадр статичного слоя, как его строит StaticCanvas: Renderer → drawTutorgoTiles. */
+  const frameOf = (
+    scene: Scene,
+    renderer: Renderer,
+    patch: Partial<StaticCanvasAppState> = {},
+    isExporting = false,
+    w = W,
+    h = H,
+  ) => {
+    const config = configOf(scene, renderer, patch, isExporting, w, h);
+    return drawTutorgoTiles(config.canvas.getContext("2d")!, config, w, h);
   };
 
   const makeScene = () => {
@@ -813,6 +830,91 @@ describe("tutorgo: тайлы — рисование", () => {
     T.work(performance.now() + 1e9); // остыли и запеклись
     expect(T.store.isHot(els[1].id)).toBe(false);
     expect(T.store.isHot(els[2].id)).toBe(false);
+  });
+
+  it("paintTile == насос: тот же журнал холста, tileElementsOf == expected", () => {
+    // элементы на стыках тайлов — каждый попадает в несколько
+    const [box, label] = API.createTextContainer();
+    mutateElement(box, { x: 450, y: 450 }, false);
+    mutateElement(label, { x: 475, y: 490 }, false);
+    const els = [
+      box,
+      label,
+      API.createElement({
+        type: "freedraw",
+        x: 480,
+        y: 100,
+        points: [
+          [0, 0],
+          [40, 30],
+          [90, 10],
+        ] as any,
+      }),
+      API.createElement({ type: "text", text: "hello", x: 100, y: 500 }),
+      API.createElement({
+        type: "image",
+        x: 300,
+        y: 300,
+        width: 400,
+        height: 200,
+        fileId: "f1",
+      }),
+      API.createElement({ type: "arrow", x: 700, y: 400, width: 200 }),
+    ];
+    const img = new Image();
+    Object.defineProperty(img, "naturalWidth", { value: 2000 });
+    Object.defineProperty(img, "naturalHeight", { value: 1000 });
+    const scene = new Scene();
+    scene.replaceAllElements(syncInvalidIndices(els));
+    const config = configOf(scene, new Renderer(scene));
+    config.renderConfig.imageCache = new Map([
+      ["f1", { image: img, mimeType: "image/jpeg" }],
+    ]) as any;
+    drawTutorgoTiles(config.canvas.getContext("2d")!, config, W, H);
+    T.work(Infinity);
+    expect(T.queueLength()).toBe(0);
+
+    const all = scene.getNonDeletedElements();
+    const map = scene.getNonDeletedElementsMap();
+    const rects = new Map(all.map((el) => [el.id, getElementBounds(el, map)]));
+    const pads = new Map(all.map((el) => [el.id, getCanvasPadding(el)]));
+    let compared = 0;
+    for (const t of T.store.tiles.values()) {
+      if (!T.store.fresh(t)) {
+        continue;
+      }
+      const picked = tileElementsOf(all, config.elementsMap, rects, pads, t);
+      expect({
+        key: t.key,
+        els: picked.map((el) => ({ id: el.id, version: el.version })),
+      }).toEqual({ key: t.key, els: T.expected(t.key) });
+
+      const canvas = document.createElement("canvas");
+      canvas.width = canvas.height = TILE_PX;
+      const ctx = canvas.getContext("2d")!;
+      expect(paintTile(ctx, rough.canvas(canvas), config, t, picked)).toBe(
+        picked.length,
+      );
+      const pumped = (t.canvas!.getContext("2d") as any).__getEvents();
+      expect({ key: t.key, events: (ctx as any).__getEvents() }).toEqual({
+        key: t.key,
+        events: pumped,
+      });
+      if (picked.length) {
+        expect(pumped.length).toBeGreaterThan(picked.length); // не пустой журнал
+        compared++;
+      }
+    }
+    // все типы сцены побывали в тайлах, тайлов с элементами — несколько
+    const inTiles = new Set(
+      [...T.store.tiles.keys()].flatMap((key) =>
+        T.painted(key).map((p) => p.id),
+      ),
+    );
+    expect(inTiles).toEqual(
+      new Set(els.map((el) => el.id).filter((id) => id !== label.id)),
+    );
+    expect(compared).toBeGreaterThan(3);
   });
 
   describe("тайлы == перерисовка с нуля", () => {

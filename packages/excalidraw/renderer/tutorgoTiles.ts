@@ -127,7 +127,8 @@ export const tileRange = (
 /** Запас на сглаживание: 2 пикселя устройства уровня, в единицах сцены. */
 const aaPad = (level: number) => 2 / 2 ** level;
 
-const tileIntersects = (t: Tile, b: Bounds, pad: number) => {
+// tutorgo: TilePos, а не Tile — общая и для tileElementsOf (archiver)
+const tileIntersects = (t: TilePos, b: Bounds, pad: number) => {
   const s = tileSceneSize(t.level);
   const e = pad + aaPad(t.level);
   return (
@@ -540,7 +541,7 @@ export class TileStore {
 
 // ─── рисование ───────────────────────────────────────────────────────────────
 
-type TilePos = { level: number; tx: number; ty: number };
+export type TilePos = { level: number; tx: number; ty: number };
 
 type Job = TilePos & {
   canvas: HTMLCanvasElement;
@@ -550,8 +551,8 @@ type Job = TilePos & {
   seq: number;
   maxIndex: string | null;
   painted: Painted[];
-  appState: StaticCanvasAppState;
-  renderConfig: StaticCanvasRenderConfig;
+  /** Конфиг кадра, в котором работа началась: камера тайла — от него. */
+  start: StaticSceneRenderConfig;
 };
 
 const store = new TileStore(() => performance.now());
@@ -921,7 +922,7 @@ const ensurePump = () => {
 };
 
 /** Камера и конфиг рендера тайла: экспорт прямоугольника сцены в масштабе 2^L. */
-const tileView = (
+export const tileView = (
   config: StaticSceneRenderConfig,
   { level, tx, ty }: TilePos,
 ) => {
@@ -1063,6 +1064,47 @@ const paintOne = (
   ctx.restore();
 };
 
+/**
+ * Рисует elements (уже в z-порядке и уже отобранные для тайла) в тайл pos, начиная
+ * с from, до дедлайна. Общая для насоса браузера и archiver'а (tutorgoRender.ts).
+ * pick — свежая версия элемента или null «пропустить» (насос: замена в сцене, горячие);
+ * onPainted — журнал/maxIndex насоса. Возвращает индекс, на котором остановились.
+ */
+export const paintTile = (
+  ctx: CanvasRenderingContext2D,
+  rc: RoughCanvas,
+  config: StaticSceneRenderConfig,
+  pos: TilePos,
+  elements: readonly NonDeletedExcalidrawElement[],
+  opts: {
+    from?: number;
+    deadline?: number;
+    pick?: (
+      el: NonDeletedExcalidrawElement,
+    ) => NonDeletedExcalidrawElement | null;
+    onPainted?: (el: NonDeletedExcalidrawElement) => void;
+  } = {},
+): number => {
+  const { deadline, pick, onPainted } = opts;
+  const k = 2 ** pos.level;
+  ctx.setTransform(k, 0, 0, k, 0, 0);
+  const { appState, renderConfig } = tileView(config, pos);
+  let i = opts.from ?? 0;
+  while (i < elements.length) {
+    const el = pick ? pick(elements[i++]) : elements[i++];
+    if (!el) {
+      continue;
+    }
+    paintOne(el, ctx, rc, config, appState, renderConfig, k);
+    onPainted?.(el);
+    // без дедлайна часы не трогаем: дорисовка одного элемента их не читала
+    if (deadline !== undefined && performance.now() >= deadline) {
+      break;
+    }
+  }
+  return i;
+};
+
 const takeCanvas = () => {
   const canvas = pool.pop() ?? document.createElement("canvas");
   if (canvas.width !== TILE_PX || canvas.height !== TILE_PX) {
@@ -1079,6 +1121,10 @@ const takeCanvas = () => {
   }
   return { canvas, rc };
 };
+
+/** Подпись рисует контейнер (paintOne), сама в тайл не идёт — если контейнер есть. */
+const drawnByContainer = (el: ExcalidrawElement, elementsMap: ElementsMap) =>
+  !!(isTextElement(el) && el.containerId && elementsMap.has(el.containerId));
 
 /** Элементы тайла в z-порядке — то, что рисует перерисовка с нуля (горячие — тоже). */
 const tileElements = (
@@ -1098,14 +1144,30 @@ const tileElements = (
     .candidates(x0 - m, y0 - m, x0 + s + m, y0 + s + m, config.elementsMap)
     .filter(
       (el) =>
-        // подпись рисует контейнер
-        !(
-          isTextElement(el) &&
-          el.containerId &&
-          config.elementsMap.has(el.containerId)
-        ) && store.touches(el.id, pos.level, pos.tx, pos.ty),
+        !drawnByContainer(el, config.elementsMap) &&
+        store.touches(el.id, pos.level, pos.tx, pos.ty),
     );
 };
+
+/**
+ * Отбор как tileElements, без индекса — для сервера: elements в z-порядке, rects —
+ * границы (getElementBounds), pads — запас (getCanvasPadding). Нет в rects — не рисуется.
+ */
+export const tileElementsOf = (
+  elements: readonly NonDeletedExcalidrawElement[],
+  elementsMap: ElementsMap,
+  rects: ReadonlyMap<string, Bounds>,
+  pads: ReadonlyMap<string, number>,
+  pos: TilePos,
+): NonDeletedExcalidrawElement[] =>
+  elements.filter((el) => {
+    const b = rects.get(el.id);
+    return (
+      !!b &&
+      !drawnByContainer(el, elementsMap) &&
+      tileIntersects(pos, b, pads.get(el.id) ?? 0)
+    );
+  });
 
 const startJob = (
   config: StaticSceneRenderConfig,
@@ -1123,7 +1185,7 @@ const startJob = (
   const { canvas, rc } = takeCanvas();
   return {
     ...pos,
-    ...tileView(config, pos),
+    start: config,
     canvas,
     rc,
     elements,
@@ -1140,28 +1202,36 @@ const paintJob = (
   config: StaticSceneRenderConfig,
   deadline: number,
 ) => {
-  const ctx = j.canvas.getContext("2d")!;
-  const k = 2 ** j.level;
-  ctx.setTransform(k, 0, 0, k, 0, 0);
-  while (j.i < j.elements.length) {
-    const id = j.elements[j.i++].id;
-    // свежая версия элемента: объект в сцене могли заменить, пока шла работа
-    const el = config.elementsMap.get(id);
-    if (!el || store.isHot(id)) {
-      continue;
-    }
-    paintOne(el, ctx, j.rc, config, j.appState, j.renderConfig, k);
-    if (JOURNAL) {
-      j.painted.push({ id, version: el.version });
-    }
-    const zi = store.zIndexOf(id);
-    if (zi && (j.maxIndex === null || zi > j.maxIndex)) {
-      j.maxIndex = zi;
-    }
-    if (performance.now() >= deadline) {
-      break;
-    }
-  }
+  j.i = paintTile(
+    j.canvas.getContext("2d")!,
+    j.rc,
+    // камера и конфиг рендера — кадра начала работы, карты элементов — текущие
+    {
+      ...j.start,
+      elementsMap: config.elementsMap,
+      allElementsMap: config.allElementsMap,
+    },
+    j,
+    j.elements,
+    {
+      from: j.i,
+      deadline,
+      // свежая версия элемента: объект в сцене могли заменить, пока шла работа
+      pick: (el) => {
+        const fresh = config.elementsMap.get(el.id);
+        return !fresh || store.isHot(el.id) ? null : fresh;
+      },
+      onPainted: (el) => {
+        if (JOURNAL) {
+          j.painted.push({ id: el.id, version: el.version });
+        }
+        const zi = store.zIndexOf(el.id);
+        if (zi && (j.maxIndex === null || zi > j.maxIndex)) {
+          j.maxIndex = zi;
+        }
+      },
+    },
+  );
   return j.i >= j.elements.length;
 };
 
@@ -1189,15 +1259,11 @@ const appendOne = (
   if (!el || !t.canvas) {
     return false;
   }
-  const ctx = t.canvas.getContext("2d")!;
-  const k = 2 ** t.level;
-  ctx.setTransform(k, 0, 0, k, 0, 0);
-  const view = tileView(config, t);
   let rc = roughOf.get(t.canvas);
   if (!rc) {
     roughOf.set(t.canvas, (rc = rough.canvas(t.canvas)));
   }
-  paintOne(el, ctx, rc, config, view.appState, view.renderConfig, k);
+  paintTile(t.canvas.getContext("2d")!, rc, config, t, [el]);
   if (JOURNAL) {
     t.painted.push({ id, version: el.version });
   }
