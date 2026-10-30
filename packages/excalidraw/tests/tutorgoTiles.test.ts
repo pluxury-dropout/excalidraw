@@ -401,11 +401,13 @@ describe("tutorgo: тайлы — рисование", () => {
     renderer: Renderer,
     patch: Partial<StaticCanvasAppState> = {},
     isExporting = false,
+    w = W,
+    h = H,
   ) => {
     const appState = {
       ...getDefaultAppState(),
-      width: W,
-      height: H,
+      width: w,
+      height: h,
       offsetLeft: 0,
       offsetTop: 0,
       scrollX: 0,
@@ -419,16 +421,16 @@ describe("tutorgo: тайлы — рисование", () => {
       offsetTop: 0,
       scrollX: appState.scrollX,
       scrollY: appState.scrollY,
-      width: W,
-      height: H,
+      width: w,
+      height: h,
       editingTextElement: null,
       newElementId: undefined,
       pendingImageElementId: null,
       sceneNonce: scene.getSceneNonce(),
     });
     const canvas = document.createElement("canvas");
-    canvas.width = W;
-    canvas.height = H;
+    canvas.width = w;
+    canvas.height = h;
     const config: StaticSceneRenderConfig = {
       canvas,
       rc: rough.canvas(canvas),
@@ -447,7 +449,7 @@ describe("tutorgo: тайлы — рисование", () => {
         pendingFlowchartNodes: null,
       },
     };
-    return drawTutorgoTiles(canvas.getContext("2d")!, config, W, H);
+    return drawTutorgoTiles(canvas.getContext("2d")!, config, w, h);
   };
 
   const makeScene = () => {
@@ -597,6 +599,127 @@ describe("tutorgo: тайлы — рисование", () => {
     T.work(performance.now() + 1e9); // остыли и запеклись
     expect(T.store.isHot(els[1].id)).toBe(false);
     expect(T.store.isHot(els[2].id)).toBe(false);
+  });
+
+  describe("тайлы == перерисовка с нуля", () => {
+    // область 4×4 тайла уровня 0, экран — вся она
+    const S = tileSceneSize(0) * 4;
+    let clock = 0;
+    beforeEach(() => {
+      clock = 0;
+      vi.spyOn(performance, "now").mockImplementation(() => clock);
+    });
+    afterEach(() => vi.restoreAllMocks());
+
+    /** Кадр, насос до пустой очереди, всё остыло и запеклось. */
+    const settle = (scene: Scene, renderer: Renderer) => {
+      for (let i = 0; i < 2; i++) {
+        frameOf(scene, renderer, {}, false, S, S);
+        for (let n = 0; n < 20 && T.queueLength(); n++) {
+          T.work(Infinity);
+        }
+        clock += HOT_MS + 1;
+        T.work(Infinity);
+      }
+      frameOf(scene, renderer, {}, false, S, S);
+      for (let n = 0; n < 20 && T.queueLength(); n++) {
+        T.work(Infinity);
+      }
+      expect(T.queueLength()).toBe(0);
+      expect(T.store.hasTimedHot()).toBe(false);
+    };
+
+    /** Каждый свежий тайл нарисован ровно тем, что дала бы перерисовка с нуля. */
+    const expectTilesMatch = (step: unknown) => {
+      let fresh = 0;
+      for (const t of T.store.tiles.values()) {
+        if (T.store.fresh(t)) {
+          fresh++;
+          expect({ step, key: t.key, els: T.painted(t.key) }).toEqual({
+            step,
+            key: t.key,
+            els: T.expected(t.key),
+          });
+        }
+      }
+      expect(fresh).toBeGreaterThan(0);
+    };
+
+    const sceneOf = (els: ExcalidrawElement[]) => {
+      const scene = new Scene();
+      scene.replaceAllElements(syncInvalidIndices(els));
+      return { scene, renderer: new Renderer(scene) };
+    };
+
+    const toFront = (scene: Scene, el: ExcalidrawElement) =>
+      scene.replaceAllElements(
+        syncInvalidIndices([
+          ...scene.getElementsIncludingDeleted().filter((e) => e !== el),
+          el,
+        ]),
+      );
+
+    it("случайная серия правок: тайлы == с нуля", () => {
+      // mulberry32: seed фиксирован — повторяемо
+      let seed = 20261030;
+      const rnd = () => {
+        seed = (seed + 0x6d2b79f5) | 0;
+        let r = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+        r = (r + Math.imul(r ^ (r >>> 7), 61 | r)) ^ r;
+        return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+      };
+      const pick = <X>(xs: readonly X[]) => xs[Math.floor(rnd() * xs.length)];
+      const shape = () =>
+        (rnd() < 0.5
+          ? rect(rnd() * S, rnd() * S)
+          : API.createElement({
+              type: "freedraw",
+              x: rnd() * S,
+              y: rnd() * S,
+              points: [
+                [0, 0],
+                [40, 30],
+                [90, 10],
+              ] as any,
+            })) as NonDeletedExcalidrawElement;
+
+      const { scene, renderer } = sceneOf(Array.from({ length: 40 }, shape));
+      settle(scene, renderer);
+      expectTilesMatch("init");
+
+      for (let i = 0; i < 200; i++) {
+        const all = scene.getElementsIncludingDeleted();
+        const alive = all.filter((e) => !e.isDeleted);
+        const deleted = all.filter((e) => e.isDeleted);
+        const op = pick([
+          "add",
+          "move",
+          "delete",
+          "bringToFront",
+          "undoDelete",
+        ] as const);
+        let el: ExcalidrawElement | undefined;
+        if (op === "add") {
+          el = shape();
+          scene.replaceAllElements(syncInvalidIndices([...all, el]));
+        } else if (op === "undoDelete") {
+          // undo удаления: тот же index, version + 1
+          if ((el = pick(deleted))) {
+            mutateElement(el, { isDeleted: false });
+          }
+        } else if ((el = pick(alive))) {
+          if (op === "move") {
+            mutateElement(el, { x: el.x + (rnd() - 0.5) * 600 });
+          } else if (op === "delete") {
+            mutateElement(el, { isDeleted: true });
+          } else {
+            toFront(scene, el);
+          }
+        }
+        settle(scene, renderer);
+        expectTilesMatch({ i, op, id: el?.id });
+      }
+    });
   });
 
   it("тёмная тема и экспорт — null", () => {

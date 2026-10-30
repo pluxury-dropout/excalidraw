@@ -18,6 +18,7 @@ import {
   isTextElement,
 } from "../element/typeChecks";
 import { TutorgoSpatialIndex } from "../scene/tutorgoIndex";
+import { isTestEnv } from "../utils";
 import {
   HOT_BULK,
   HOT_MS,
@@ -79,7 +80,14 @@ export type Tile = {
   maxIndex: string | null;
   /** Номер кадра, когда тайл последний раз был нужен на экране. */
   lastUsed: number;
+  /** Только в тестах: что нарисовано в тайле, в порядке рисования. */
+  painted: Painted[];
 };
+
+export type Painted = { id: string; version: number };
+
+// журнал состава тайла — для теста «тайлы == с нуля», в проде не пишется
+const JOURNAL = isTestEnv();
 
 type Recent = {
   /** seq последнего изменения (правка или остывание). */
@@ -462,6 +470,7 @@ export class TileStore {
         invalidSeq: 0,
         maxIndex: null,
         lastUsed: 0,
+        painted: [],
       };
       this.tiles.set(key, t);
     }
@@ -542,6 +551,7 @@ type Job = TilePos & {
   i: number;
   seq: number;
   maxIndex: string | null;
+  painted: Painted[];
   appState: StaticCanvasAppState;
   renderConfig: StaticCanvasRenderConfig;
 };
@@ -1015,20 +1025,21 @@ const takeCanvas = () => {
   return { canvas, rc };
 };
 
-const startJob = (
+/** Элементы тайла в z-порядке — то, что рисует перерисовка с нуля (горячие — тоже). */
+const tileElements = (
   config: StaticSceneRenderConfig,
   pos: TilePos,
-): Job | null => {
+): NonDeletedExcalidrawElement[] => {
   const index = store.index;
   if (!index) {
-    return null;
+    return [];
   }
   const s = tileSceneSize(pos.level);
   // запас: getCanvasPadding (до ~50) и сглаживание; точный отбор — touches
   const m = 100 + 2 / 2 ** pos.level;
   const x0 = pos.tx * s;
   const y0 = pos.ty * s;
-  const elements = index
+  return index
     .candidates(x0 - m, y0 - m, x0 + s + m, y0 + s + m, config.elementsMap)
     .filter(
       (el) =>
@@ -1039,6 +1050,16 @@ const startJob = (
           config.elementsMap.has(el.containerId)
         ) && store.touches(el.id, pos.level, pos.tx, pos.ty),
     );
+};
+
+const startJob = (
+  config: StaticSceneRenderConfig,
+  pos: TilePos,
+): Job | null => {
+  if (!store.index) {
+    return null;
+  }
+  const elements = tileElements(config, pos);
   // Заготовка в учёте с первого кадра работы: правки, пришедшие, пока тайл
   // рисуется, должны его инвалидировать — иначе коммит сочтёт тайл свежим с
   // призраком удалённого внутри.
@@ -1054,6 +1075,7 @@ const startJob = (
     i: 0,
     seq: store.seq,
     maxIndex: null,
+    painted: [],
   };
 };
 
@@ -1074,6 +1096,9 @@ const paintJob = (
       continue;
     }
     paintOne(el, ctx, j.rc, config, j.appState, j.renderConfig, k);
+    if (JOURNAL) {
+      j.painted.push({ id, version: el.version });
+    }
     const zi = store.zIndexOf(id);
     if (zi && (j.maxIndex === null || zi > j.maxIndex)) {
       j.maxIndex = zi;
@@ -1091,6 +1116,7 @@ const commit = (j: Job) => {
   t.canvas = j.canvas;
   t.contentSeq = j.seq;
   t.maxIndex = j.maxIndex;
+  t.painted = j.painted;
   t.lastUsed = frame;
   if (old) {
     release([old]);
@@ -1117,6 +1143,9 @@ const appendOne = (
     roughOf.set(t.canvas, (rc = rough.canvas(t.canvas)));
   }
   paintOne(el, ctx, rc, config, view.appState, view.renderConfig, k);
+  if (JOURNAL) {
+    t.painted.push({ id, version: el.version });
+  }
   return true;
 };
 
@@ -1169,4 +1198,17 @@ export const __tutorgoTilesForTests = {
   setEnabled,
   work,
   queueLength: () => queue.length + (job ? 1 : 0),
+  /** Что нарисовано в тайле, в порядке рисования. */
+  painted: (key: string): ReadonlyArray<Painted> =>
+    store.tiles.get(key)?.painted ?? [],
+  /** Что нарисовала бы перерисовка тайла с нуля сейчас: без горячих, в z-порядке. */
+  expected: (key: string): ReadonlyArray<Painted> => {
+    const t = store.tiles.get(key);
+    if (!t || !lastConfig) {
+      return [];
+    }
+    return tileElements(lastConfig, t)
+      .filter((el) => !store.isHot(el.id))
+      .map((el) => ({ id: el.id, version: el.version }));
+  },
 };
