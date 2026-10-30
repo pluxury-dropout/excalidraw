@@ -515,7 +515,7 @@ describe("tutorgo: тайлы — рисование", () => {
     iosFlag.value = true; // бюджет 80
     try {
       const { scene, renderer } = makeScene();
-      // зум чуть больше 1 — уровень 1: экран 4×4, кольцо 20, L+1 — 8×7 = 56
+      // зум чуть больше 1 — уровень 1: экран 4×4, кольцо 20, L+1 — 8×8 = 64
       const zoomed = { zoom: { value: 1.01 as NormalizedZoomValue } };
       frameOf(scene, renderer, zoomed);
       T.work(performance.now() + 1e9);
@@ -532,6 +532,25 @@ describe("tutorgo: тайлы — рисование", () => {
       }
     } finally {
       iosFlag.value = false;
+    }
+  });
+
+  it("L+1 помечен нужным в кадре простоя — evict его не выгоняет", () => {
+    const { scene, renderer } = makeScene();
+    frameOf(scene, renderer);
+    T.work(performance.now() + 1e9);
+    // посторонние тайлы «свежее любого кадра»: без пометки выгнали бы L+1;
+    // экран + кольцо + L+1 = 32, всего на 5 больше бюджета
+    for (let i = 0; i < TILE_BUDGET - 32 + 5; i++) {
+      const t = T.store.tile(0, 100 + i, 0);
+      t.canvas = document.createElement("canvas");
+      t.lastUsed = 1e9;
+    }
+    frameOf(scene, renderer); // кадр простоя
+    const now = T.store.tiles.get(tileKey(0, 0, 0))!.lastUsed;
+    T.store.evict(now);
+    for (const tile of childTiles()) {
+      expect(tile?.canvas).toBeTruthy();
     }
   });
 
