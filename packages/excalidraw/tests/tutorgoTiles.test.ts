@@ -370,19 +370,24 @@ describe("tutorgo: тайлы — память", () => {
     Object.defineProperty(img, "naturalHeight", { value: LOD_SIDE * 2 });
     const lod = (id: string) => lodImage(id, img)!;
     T.lods.clear();
-    const first = lod("f0");
-    for (let i = 1; i < LOD_BUDGET; i++) {
-      lod(`f${i}`);
+    try {
+      const first = lod("f0");
+      const second = lod("f1"); // после f0 станет самым старым
+      for (let i = 2; i < LOD_BUDGET; i++) {
+        lod(`f${i}`);
+      }
+      expect(lod("f0")).toBe(first); // f0 стал самым свежим
+      for (let i = 0; i < 10; i++) {
+        lod(`extra${i}`);
+      }
+      expect(T.lods.size).toBe(LOD_BUDGET);
+      expect(lod("f0")).toBe(first);
+      expect(first.width).toBeGreaterThan(0);
+      expect(T.lods.has("f1")).toBe(false); // самый старый выгнан
+      expect(second.width).toBe(0); // и обнулён
+    } finally {
+      T.lods.clear();
     }
-    expect(lod("f0")).toBe(first); // f0 стал самым свежим
-    for (let i = 0; i < 10; i++) {
-      lod(`extra${i}`);
-    }
-    expect(T.lods.size).toBe(LOD_BUDGET);
-    expect(lod("f0")).toBe(first);
-    expect(first.width).toBeGreaterThan(0);
-    expect(T.lods.has("f1")).toBe(false); // самый старый выгнан
-    T.lods.clear();
   });
 });
 
