@@ -113,6 +113,11 @@ export type BinaryFileData = {
    * the file dataURL has changed e.g. as part of restore due to schema update.
    */
   version?: number;
+  /** tutorgo: адрес оригинала в files-карте доски — хост ставит на каждый свой
+   * файл; едет в буфер обмена вместе с файлом. */
+  tutorgoUrl?: string;
+  /** tutorgo: в files и imageCache сейчас миниатюра, не оригинал. */
+  tutorgoThumb?: true;
 };
 
 export type BinaryFileMetadata = Omit<BinaryFileData, "dataURL">;
@@ -794,6 +799,10 @@ export interface ExcalidrawImperativeAPI {
   refresh: InstanceType<typeof App>["refresh"];
   setToast: InstanceType<typeof App>["setToast"];
   addFiles: (data: BinaryFileData[]) => void;
+  /** tutorgo: подменяет версию известных файлов (миниатюра ↔ полная) без
+   * мигания, неизвестные добавляет как addFiles. Резолвится после подмены всех;
+   * возвращает id, чьё раскодирование упало (у них осталась старая версия). */
+  tutorgoReplaceFiles: (data: BinaryFileData[]) => Promise<FileId[]>;
   id: string;
   setActiveTool: InstanceType<typeof App>["setActiveTool"];
   setCursor: InstanceType<typeof App>["setCursor"];
