@@ -1210,6 +1210,19 @@ const work = (deadline: number) => {
   if (!config || !enabled) {
     return;
   }
+  try {
+    pump(config, deadline);
+  } catch (error) {
+    // Напр. getContext → null у холста тайла (лимит памяти WebKit на iPad):
+    // без выключателя работа падала бы на каждом шаге, а дыры на экране так и
+    // остались бы пустыми. Тайлы — выкл., кадр сразу заново по-старому.
+    console.error("tutorgo: тайлы выключены после ошибки", error);
+    setEnabled(false);
+    renderStaticScene(config);
+  }
+};
+
+const pump = (config: StaticSceneRenderConfig, deadline: number) => {
   let dirty = false;
   for (const id of store.tick()) {
     store.bake(id, (t) => appendOne(t, id, config));

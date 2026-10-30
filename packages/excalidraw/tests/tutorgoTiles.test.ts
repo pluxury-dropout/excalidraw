@@ -610,6 +610,46 @@ describe("tutorgo: тайлы — рисование", () => {
     }
   });
 
+  it("ошибка в насосе — work не бросает, тайлы выкл., кадр перерисован по-старому", () => {
+    // WebKit упёрся в лимит памяти холстов: у холста тайла (512 px) нет
+    // контекста. Холст экрана (W × H) — как был; его getContext = перерисовка.
+    let failing = false;
+    const screenCalls: HTMLCanvasElement[] = [];
+    const create = document.createElement.bind(document);
+    vi.spyOn(document, "createElement").mockImplementation(
+      (tag: string, opts?: ElementCreationOptions) => {
+        const el = create(tag, opts);
+        if (el instanceof HTMLCanvasElement) {
+          const real = el.getContext.bind(el) as (...a: any[]) => any;
+          el.getContext = ((...a: any[]) => {
+            if (failing && el.width === 512) {
+              return null;
+            }
+            if (failing && el.width === W) {
+              screenCalls.push(el);
+            }
+            return real(...a);
+          }) as any;
+        }
+        return el;
+      },
+    );
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const { scene, renderer } = makeScene();
+      frameOf(scene, renderer);
+      failing = true;
+      expect(() => T.work(performance.now() + 1e9)).not.toThrow();
+      expect(err).toHaveBeenCalled();
+      expect(screenCalls.length).toBeGreaterThan(0); // старый путь перерисовал
+      expect(T.queueLength()).toBe(0);
+      failing = false;
+      expect(frameOf(scene, renderer)).toBe(null); // выключено до конца сессии
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
   it("ошибка в тайлах — первый же кадр null", () => {
     const { scene, renderer } = makeScene();
     const err = vi.spyOn(console, "error").mockImplementation(() => {});
