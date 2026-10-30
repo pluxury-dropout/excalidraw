@@ -271,7 +271,7 @@ const _renderStaticScene = (config: StaticSceneRenderConfig) => {
     );
   }
 
-  // tutorgo: тайлы —готовые квадраты вместо элементов; дальше
+  // tutorgo: тайлы — готовые квадраты вместо элементов; дальше
   // рисуются только живые (свежие правки, стираемые, рамки и т.п.).
   const tiled = drawTutorgoTiles(
     context,

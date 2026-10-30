@@ -594,6 +594,13 @@ const abortJob = () => {
 const resetAll = () => {
   abortJob();
   release(store.reset());
+  // пул и LOD-копии тоже: на iPad холсты считаются в общий лимит памяти WebKit
+  for (const c of [...pool, ...lods.values()]) {
+    c.width = 0;
+    c.height = 0;
+  }
+  pool.length = 0;
+  lods.clear();
   lastConfig = null;
   queue = [];
   if (raf) {
@@ -767,6 +774,23 @@ export const drawTutorgoTiles = (
   normalizedWidth: number,
   normalizedHeight: number,
 ): readonly NonDeletedExcalidrawElement[] | null => {
+  try {
+    return drawTiles(context, config, normalizedWidth, normalizedHeight);
+  } catch (error) {
+    // Флага-рубильника больше нет: исключение дошло бы до React каждый кадр
+    // (экран падения доски). Тайлы — до конца сессии выкл., кадр — по-старому.
+    console.error("tutorgo: тайлы выключены после ошибки", error);
+    setEnabled(false);
+    return null;
+  }
+};
+
+const drawTiles = (
+  context: CanvasRenderingContext2D,
+  config: StaticSceneRenderConfig,
+  normalizedWidth: number,
+  normalizedHeight: number,
+): readonly NonDeletedExcalidrawElement[] | null => {
   if (!applicable(config)) {
     // экспорт рисует на свой холст — тайлам не мешает; иначе (тёмная тема и
     // т.п.) насос не должен дорисовывать устаревший кадр поверх обычного
@@ -800,60 +824,70 @@ export const drawTutorgoTiles = (
   hole = false;
 
   context.save();
-  context.setTransform(1, 0, 0, 1, 0, 0);
-  for (let tx = screen.tx1 - 1; tx <= screen.tx2 + 1; tx++) {
-    for (let ty = screen.ty1 - 1; ty <= screen.ty2 + 1; ty++) {
-      const pos = { level, tx, ty };
-      const t = store.tiles.get(tileKey(level, tx, ty));
-      const onScreen =
-        tx >= screen.tx1 &&
-        tx <= screen.tx2 &&
-        ty >= screen.ty1 &&
-        ty <= screen.ty2;
-      if (!onScreen) {
-        if (t) {
+  // finally: при ошибке посреди композита старый путь получит холст без нашего
+  // setTransform
+  try {
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    for (let tx = screen.tx1 - 1; tx <= screen.tx2 + 1; tx++) {
+      for (let ty = screen.ty1 - 1; ty <= screen.ty2 + 1; ty++) {
+        const pos = { level, tx, ty };
+        const t = store.tiles.get(tileKey(level, tx, ty));
+        const onScreen =
+          tx >= screen.tx1 &&
+          tx <= screen.tx2 &&
+          ty >= screen.ty1 &&
+          ty <= screen.ty2;
+        if (!onScreen) {
+          if (t) {
+            t.lastUsed = frame;
+          }
+          if (!t || !store.fresh(t)) {
+            ring.push(pos);
+          }
+          continue;
+        }
+        if (t?.canvas) {
           t.lastUsed = frame;
+          context.drawImage(t.canvas, ...destRect(pos, appState, f));
+        } else if (!drawFallback(context, pos, appState, f)) {
+          hole = true;
         }
         if (!t || !store.fresh(t)) {
-          ring.push(pos);
+          need.push({ ...pos, d: (tx - cx) ** 2 + (ty - cy) ** 2 });
         }
-        continue;
-      }
-      if (t?.canvas) {
-        t.lastUsed = frame;
-        context.drawImage(t.canvas, ...destRect(pos, appState, f));
-      } else if (!drawFallback(context, pos, appState, f)) {
-        hole = true;
-      }
-      if (!t || !store.fresh(t)) {
-        need.push({ ...pos, d: (tx - cx) ** 2 + (ty - cy) ** 2 });
       }
     }
+  } finally {
+    context.restore();
   }
-  context.restore();
 
   need.sort((a, b) => a.d - b.d);
   // Простой: экран готов — уровень L+1 под экран (от центра), чтобы зум внутрь
-  // сразу был резким. Только если экран, кольцо и L+1 вместе влезают в бюджет:
-  // иначе evict выгонял бы одно ради другого по кругу.
+  // сразу был резким. Сколько влезает в бюджет сверх экрана с кольцом, ближние
+  // к центру: иначе evict выгонял бы одно ради другого по кругу.
   const up: (TilePos & { d: number })[] = [];
   const w = screen.tx2 - screen.tx1 + 1;
   const h = screen.ty2 - screen.ty1 + 1;
-  if (!need.length && (w + 2) * (h + 2) + 4 * w * h <= tileBudget()) {
+  const room = tileBudget() - (w + 2) * (h + 2);
+  if (!need.length && room > 0) {
+    const all: (TilePos & { d: number })[] = [];
     for (let tx = screen.tx1 * 2; tx <= screen.tx2 * 2 + 1; tx++) {
       for (let ty = screen.ty1 * 2; ty <= screen.ty2 * 2 + 1; ty++) {
-        const t = store.tiles.get(tileKey(level + 1, tx, ty));
-        if (t) {
-          t.lastUsed = frame; // evict не выгонит предзагруженное
-        }
-        if (!t || !store.fresh(t)) {
-          // центр дочернего в индексах уровня L: (tx − 0,5) / 2
-          const d = ((tx - 0.5) / 2 - cx) ** 2 + ((ty - 0.5) / 2 - cy) ** 2;
-          up.push({ level: level + 1, tx, ty, d });
-        }
+        // центр дочернего в индексах уровня L: (tx − 0,5) / 2
+        const d = ((tx - 0.5) / 2 - cx) ** 2 + ((ty - 0.5) / 2 - cy) ** 2;
+        all.push({ level: level + 1, tx, ty, d });
       }
     }
-    up.sort((a, b) => a.d - b.d);
+    all.sort((a, b) => a.d - b.d);
+    for (const pos of all.slice(0, room)) {
+      const t = store.tiles.get(tileKey(pos.level, pos.tx, pos.ty));
+      if (t) {
+        t.lastUsed = frame; // evict не выгонит предзагруженное
+      }
+      if (!t || !store.fresh(t)) {
+        up.push(pos);
+      }
+    }
   }
   queue = [...need, ...ring, ...up];
   if (
@@ -1227,6 +1261,7 @@ export const __tutorgoTilesForTests = {
   setEnabled,
   work,
   queueLength: () => queue.length + (job ? 1 : 0),
+  poolSize: () => pool.length,
   queue: () => [...queue],
   /** Что нарисовано в тайле, в порядке рисования. */
   painted: (key: string): ReadonlyArray<Painted> =>

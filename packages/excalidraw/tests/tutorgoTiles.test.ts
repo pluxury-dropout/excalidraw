@@ -511,28 +511,135 @@ describe("tutorgo: тайлы — рисование", () => {
     }
   });
 
-  it("L+1 не влезает в бюджет — не ставится, экран не выгоняется", () => {
+  /** Экран и кольцо уровня level целиком на месте и свежие. */
+  const expectScreenAndRing = (level: number, tx2: number, ty2: number) => {
+    for (let tx = -1; tx <= tx2 + 1; tx++) {
+      for (let ty = -1; ty <= ty2 + 1; ty++) {
+        const tile = T.store.tiles.get(tileKey(level, tx, ty));
+        expect({ tx, ty, ok: !!tile && T.store.fresh(tile) }).toEqual({
+          tx,
+          ty,
+          ok: true,
+        });
+      }
+    }
+  };
+
+  it("L+1 частично: сколько влезает в бюджет, от центра; экран не выгоняется", () => {
     iosFlag.value = true; // бюджет 80
     try {
       const { scene, renderer } = makeScene();
-      // зум чуть больше 1 — уровень 1: экран 4×4, кольцо 20, L+1 — 8×8 = 64
+      // зум чуть больше 1 — уровень 1: экран 4×4 + кольцо = 6×6 = 36,
+      // на L+1 (8×8 = 64) остаётся 80 − 36 = 44
       const zoomed = { zoom: { value: 1.01 as NormalizedZoomValue } };
+      for (let i = 0; i < 3; i++) {
+        frameOf(scene, renderer, zoomed);
+        T.work(performance.now() + 1e9);
+      }
       frameOf(scene, renderer, zoomed);
-      T.work(performance.now() + 1e9);
-      frameOf(scene, renderer, zoomed);
-      expect(T.queue().some((q) => q.level === 2)).toBe(false);
-      expect([...T.store.tiles.values()].some((x) => x.level === 2)).toBe(
-        false,
-      );
-      for (let tx = 0; tx <= 3; tx++) {
-        for (let ty = 0; ty <= 3; ty++) {
-          const tile = T.store.tiles.get(tileKey(1, tx, ty));
-          expect(tile && T.store.fresh(tile)).toBe(true);
+      expect(T.queueLength()).toBe(0);
+      const up = [...T.store.tiles.values()].filter((x) => x.level === 2);
+      expect(up).toHaveLength(44);
+      expect(up.every((x) => T.store.fresh(x))).toBe(true);
+      // центр экрана в индексах L+1 — (4, 4); взяты ближайшие к нему
+      const d = (tx: number, ty: number) =>
+        (tx + 0.5 - 4) ** 2 + (ty + 0.5 - 4) ** 2;
+      const taken = new Set(up.map((x) => tileKey(2, x.tx, x.ty)));
+      let maxTaken = 0;
+      let minLeft = Infinity;
+      for (let tx = 0; tx < 8; tx++) {
+        for (let ty = 0; ty < 8; ty++) {
+          if (taken.has(tileKey(2, tx, ty))) {
+            maxTaken = Math.max(maxTaken, d(tx, ty));
+          } else {
+            minLeft = Math.min(minLeft, d(tx, ty));
+          }
         }
       }
+      expect(taken.size).toBe(44); // все — под экраном
+      expect(maxTaken).toBeLessThanOrEqual(minLeft);
+      expectScreenAndRing(1, 3, 3);
     } finally {
       iosFlag.value = false;
     }
+  });
+
+  it("L+1 без места в бюджете — ни одного", () => {
+    iosFlag.value = true; // бюджет 80
+    try {
+      const { scene, renderer } = makeScene();
+      // уровень 0, экран 8×7 + кольцо = 10×9 = 90 > 80
+      const big = () => frameOf(scene, renderer, {}, false, 4000, 3500);
+      big();
+      T.work(performance.now() + 1e9);
+      big();
+      T.work(performance.now() + 1e9);
+      big();
+      expect(T.queue().some((q) => q.level === 1)).toBe(false);
+      expect([...T.store.tiles.values()].some((x) => x.level === 1)).toBe(
+        false,
+      );
+      expectScreenAndRing(0, 7, 6);
+    } finally {
+      iosFlag.value = false;
+    }
+  });
+
+  it("ошибка в тайлах — null, без исключения, save/restore сбалансированы, дальше выключено", () => {
+    const { scene, renderer } = makeScene();
+    frameOf(scene, renderer);
+    T.work(performance.now() + 1e9); // у тайлов экрана есть холсты — будет drawImage
+    const proto = CanvasRenderingContext2D.prototype;
+    const draw = vi.spyOn(proto, "drawImage").mockImplementation(() => {
+      throw new Error("boom");
+    });
+    const save = vi.spyOn(proto, "save");
+    const restore = vi.spyOn(proto, "restore");
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      expect(() => frameOf(scene, renderer)).not.toThrow();
+      expect(draw).toHaveBeenCalled();
+      expect(err).toHaveBeenCalled();
+      expect(save.mock.calls.length).toBe(restore.mock.calls.length);
+      draw.mockRestore();
+      expect(frameOf(scene, renderer)).toBe(null); // выключено до конца сессии
+      expect(T.store.tiles.size).toBe(0);
+      expect(T.queueLength()).toBe(0);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("ошибка в тайлах — первый же кадр null", () => {
+    const { scene, renderer } = makeScene();
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    const spy = vi.spyOn(T.store, "setStateHot").mockImplementation(() => {
+      throw new Error("boom");
+    });
+    try {
+      expect(frameOf(scene, renderer)).toBe(null);
+      expect(err).toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+      err.mockRestore();
+    }
+  });
+
+  it("уход с доски — LOD-копии и пул холстов освобождены", () => {
+    const { scene, renderer } = makeScene();
+    frameOf(scene, renderer);
+    T.work(performance.now() + 1e9);
+    const img = document.createElement("img");
+    Object.defineProperty(img, "naturalWidth", { value: LOD_SIDE * 4 });
+    Object.defineProperty(img, "naturalHeight", { value: LOD_SIDE * 2 });
+    const lod = lodImage("f0", img)!;
+    expect(lod.width).toBeGreaterThan(0);
+    const tile = [...T.store.tiles.values()].find((t) => t.canvas)!.canvas!;
+    renderer.destroy();
+    expect(T.lods.size).toBe(0);
+    expect(lod.width).toBe(0);
+    expect(T.poolSize()).toBe(0);
+    expect(tile.width).toBe(0); // холст тайла не застрял в пуле
   });
 
   it("L+1 помечен нужным в кадре простоя — evict его не выгоняет", () => {
