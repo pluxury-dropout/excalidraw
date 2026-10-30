@@ -198,6 +198,10 @@ export const TILE_FRAME_BUDGET_MS = 6;
 export const TILE_EMPTY_BUDGET_MS = 20;
 /** Тайлов в кэше (тайл = 1 МБ). У Safari на iOS общий потолок памяти холстов. */
 export const TILE_BUDGET = 160;
+/** На iOS экрану iPad нужно ~24 тайла; общий потолок холстов WebKit ~384 МБ. */
+export const TILE_BUDGET_IOS = 80;
+/** Уменьшенных копий картинок в памяти (~180 КБ каждая), сверх — выгоняем старые. */
+export const LOD_BUDGET = 200;
 /** Освободившихся холстов держим для переиспользования (без GC и getContext). */
 export const TILE_POOL = 8;
 /** Правка свежее этого рисуется живьём поверх тайлов, тайлы не трогает. */

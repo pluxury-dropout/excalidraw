@@ -10,6 +10,8 @@ import {
   __tutorgoTilesForTests as T,
   drawTutorgoTiles,
   levelFor,
+  lodImage,
+  tileBudget,
   tileKey,
   tileRange,
   tileSceneSize,
@@ -18,7 +20,14 @@ import {
 import { Renderer } from "../scene/Renderer";
 import Scene from "../scene/Scene";
 import { TutorgoSpatialIndex } from "../scene/tutorgoIndex";
-import { HOT_BULK, HOT_MS, LOD_SIDE, TILE_BUDGET } from "../tutorgo";
+import {
+  HOT_BULK,
+  HOT_MS,
+  LOD_BUDGET,
+  LOD_SIDE,
+  TILE_BUDGET,
+  TILE_BUDGET_IOS,
+} from "../tutorgo";
 
 import type { StaticSceneRenderConfig } from "../scene/types";
 import type { NormalizedZoomValue, StaticCanvasAppState } from "../types";
@@ -30,6 +39,15 @@ import type {
   ExcalidrawElement,
   NonDeletedExcalidrawElement,
 } from "../element/types";
+
+// isIOS — константа модуля; подменяем геттером, чтобы проверить бюджет iOS.
+const iosFlag = vi.hoisted(() => ({ value: false }));
+vi.mock("../constants", async (orig) => {
+  const actual = await orig<typeof import("../constants")>();
+  return new Proxy(actual, {
+    get: (t, k) => (k === "isIOS" ? iosFlag.value : (t as any)[k]),
+  });
+});
 
 const mapOf = (els: readonly ExcalidrawElement[]) =>
   new Map(els.map((e) => [e.id, e])) as any;
@@ -320,6 +338,51 @@ describe("tutorgo: тайлы — учёт", () => {
     for (let i = 0; i < 10; i++) {
       expect(store.tiles.has(tileKey(0, i, 0))).toBe(true);
     }
+  });
+});
+
+describe("tutorgo: тайлы — память", () => {
+  it("бюджет тайлов на iOS", () => {
+    iosFlag.value = true;
+    try {
+      expect(tileBudget()).toBe(TILE_BUDGET_IOS);
+      expect(TILE_BUDGET_IOS).toBe(80);
+      const { store } = setup([]);
+      for (let i = 0; i < 100; i++) {
+        const t = store.tile(0, i, 0);
+        t.canvas = document.createElement("canvas");
+        t.lastUsed = i < 10 ? 7 : 1; // первые 10 нужны в кадре 7
+      }
+      store.evict(7);
+      expect(store.tiles.size).toBeLessThanOrEqual(TILE_BUDGET_IOS);
+      for (let i = 0; i < 10; i++) {
+        expect(store.tiles.has(tileKey(0, i, 0))).toBe(true);
+      }
+    } finally {
+      iosFlag.value = false;
+    }
+    expect(tileBudget()).toBe(TILE_BUDGET);
+  });
+
+  it("LOD-копии: LRU", () => {
+    const img = document.createElement("img");
+    Object.defineProperty(img, "naturalWidth", { value: LOD_SIDE * 4 });
+    Object.defineProperty(img, "naturalHeight", { value: LOD_SIDE * 2 });
+    const lod = (id: string) => lodImage(id, img)!;
+    T.lods.clear();
+    const first = lod("f0");
+    for (let i = 1; i < LOD_BUDGET; i++) {
+      lod(`f${i}`);
+    }
+    expect(lod("f0")).toBe(first); // f0 стал самым свежим
+    for (let i = 0; i < 10; i++) {
+      lod(`extra${i}`);
+    }
+    expect(T.lods.size).toBe(LOD_BUDGET);
+    expect(lod("f0")).toBe(first);
+    expect(first.width).toBeGreaterThan(0);
+    expect(T.lods.has("f1")).toBe(false); // самый старый выгнан
+    T.lods.clear();
   });
 });
 

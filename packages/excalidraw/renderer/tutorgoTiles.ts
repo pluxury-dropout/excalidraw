@@ -7,7 +7,7 @@
 // живьём. Рисование и насос — ниже, в части «рисование».
 import rough from "roughjs/bin/rough";
 
-import { THEME } from "../constants";
+import { THEME, isIOS } from "../constants";
 import { getBoundTextElement } from "../element/textElement";
 import {
   hasBoundTextElement,
@@ -21,9 +21,11 @@ import { TutorgoSpatialIndex } from "../scene/tutorgoIndex";
 import {
   HOT_BULK,
   HOT_MS,
+  LOD_BUDGET,
   LOD_SIDE,
   TILES,
   TILE_BUDGET,
+  TILE_BUDGET_IOS,
   TILE_EMPTY_BUDGET_MS,
   TILE_FALLBACK_LEVELS,
   TILE_FRAME_BUDGET_MS,
@@ -143,6 +145,10 @@ const isAlwaysLive = (el: ExcalidrawElement) =>
 
 const toggle = (set: Set<Id>, id: Id, on: boolean) =>
   on ? set.add(id) : set.delete(id);
+
+/** Бюджет тайлов: на iOS меньше, у WebKit общий потолок памяти холстов. */
+export const tileBudget = (): number =>
+  isIOS ? TILE_BUDGET_IOS : TILE_BUDGET;
 
 export class TileStore {
   tiles = new Map<string, Tile>();
@@ -461,10 +467,10 @@ export class TileStore {
     return t;
   }
 
-  /** LRU: сверх TILE_BUDGET выгоняет давно не нужные; нужные в кадре `frame` не трогает. */
+  /** LRU: сверх tileBudget() выгоняет давно не нужные; нужные в кадре `frame` не трогает. */
   evict(frame: number): HTMLCanvasElement[] {
     const drawn = [...this.tiles.values()].filter((t) => t.canvas);
-    const extra = drawn.length - TILE_BUDGET;
+    const extra = drawn.length - tileBudget();
     if (extra <= 0) {
       return [];
     }
@@ -876,8 +882,7 @@ type LodCanvas = HTMLCanvasElement & {
   naturalHeight: number;
 };
 
-// ponytail: копии живут, пока жива вкладка (~180 КБ на картинку, 330 страниц PDF ≈
-// 60 МБ); LRU или серверные /thumb вместо них — на шаге «полная версия».
+// LRU на порядке вставки Map: свежие — в конце, сверх LOD_BUDGET выгоняем первый.
 const lods = new Map<string, LodCanvas>();
 
 /**
@@ -891,6 +896,8 @@ export const lodImage = (
 ): LodCanvas | null => {
   const cached = lods.get(fileId);
   if (cached) {
+    lods.delete(fileId); // в конец очереди: недавно использованная
+    lods.set(fileId, cached);
     return cached;
   }
   const s = LOD_SIDE / Math.max(img.naturalWidth, img.naturalHeight);
@@ -909,6 +916,11 @@ export const lodImage = (
   ctx.imageSmoothingQuality = "high"; // иначе уменьшение в 8 раз — «лесенка»
   ctx.drawImage(img, 0, 0, w, h);
   lods.set(fileId, canvas);
+  if (lods.size > LOD_BUDGET) {
+    const [oldId, old] = lods.entries().next().value!;
+    lods.delete(oldId);
+    old.width = old.height = 0; // сразу вернуть память холста
+  }
   return canvas;
 };
 
@@ -1150,6 +1162,7 @@ export const tutorgoTilesReset = resetAll;
 /** Только для тестов: включить без localStorage и прогнать насос синхронно. */
 export const __tutorgoTilesForTests = {
   store,
+  lods,
   setEnabled,
   work,
   queueLength: () => queue.length + (job ? 1 : 0),
