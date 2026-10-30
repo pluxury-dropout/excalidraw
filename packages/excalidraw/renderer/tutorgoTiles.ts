@@ -835,11 +835,34 @@ export const drawTutorgoTiles = (
   context.restore();
 
   need.sort((a, b) => a.d - b.d);
-  queue = [...need, ...ring];
+  // Простой: экран готов — уровень L+1 под экран (от центра), чтобы зум внутрь
+  // сразу был резким. Только если экран, кольцо и L+1 вместе влезают в бюджет:
+  // иначе evict выгонял бы одно ради другого по кругу.
+  const up: (TilePos & { d: number })[] = [];
+  const w = screen.tx2 - screen.tx1 + 1;
+  const h = screen.ty2 - screen.ty1 + 1;
+  if (!need.length && (w + 2) * (h + 2) + 4 * w * h <= tileBudget()) {
+    for (let tx = screen.tx1 * 2; tx <= screen.tx2 * 2 + 1; tx++) {
+      for (let ty = screen.ty1 * 2; ty <= screen.ty2 * 2 + 1; ty++) {
+        const t = store.tiles.get(tileKey(level + 1, tx, ty));
+        if (t) {
+          t.lastUsed = frame; // evict не выгонит предзагруженное
+        }
+        if (!t || !store.fresh(t)) {
+          // центр дочернего в индексах уровня L: (tx − 0,5) / 2
+          const d = ((tx - 0.5) / 2 - cx) ** 2 + ((ty - 0.5) / 2 - cy) ** 2;
+          up.push({ level: level + 1, tx, ty, d });
+        }
+      }
+    }
+    up.sort((a, b) => a.d - b.d);
+  }
+  queue = [...need, ...ring, ...up];
   if (
     job &&
-    (job.level !== level ||
-      !queue.some((q) => q.tx === job!.tx && q.ty === job!.ty))
+    !queue.some(
+      (q) => q.level === job!.level && q.tx === job!.tx && q.ty === job!.ty,
+    )
   ) {
     abortJob();
   }
@@ -1169,6 +1192,14 @@ const work = (deadline: number) => {
           break;
         }
       }
+      if (!next && dirty) {
+        // очередь кончилась — композит заново: кадр поставит L+1 (простой)
+        dirty = false;
+        renderStaticScene(config);
+        if (queue.length) {
+          continue;
+        }
+      }
       job = next ? startJob(config, next) : null;
       if (!job) {
         break;
@@ -1198,6 +1229,7 @@ export const __tutorgoTilesForTests = {
   setEnabled,
   work,
   queueLength: () => queue.length + (job ? 1 : 0),
+  queue: () => [...queue],
   /** Что нарисовано в тайле, в порядке рисования. */
   painted: (key: string): ReadonlyArray<Painted> =>
     store.tiles.get(key)?.painted ?? [],

@@ -487,6 +487,73 @@ describe("tutorgo: тайлы — рисование", () => {
     }
   });
 
+  const childTiles = () =>
+    [0, 1, 2, 3].flatMap((tx) =>
+      [0, 1, 2, 3].map((ty) => T.store.tiles.get(tileKey(1, tx, ty))),
+    );
+
+  it("L+1 в простое: только после тайлов экрана, потом свежие", () => {
+    const { scene, renderer } = makeScene();
+    frameOf(scene, renderer);
+    // часы идут на 1 мс за вызов: шаг насоса не успеет дорисовать экран
+    let t = 0;
+    const spy = vi.spyOn(performance, "now").mockImplementation(() => t++);
+    T.work(2);
+    spy.mockRestore();
+    frameOf(scene, renderer);
+    expect(screenTiles().every((tile) => tile && T.store.fresh(tile))).toBe(
+      false,
+    );
+    expect(T.queue().some((q) => q.level === 1)).toBe(false);
+    T.work(performance.now() + 1e9);
+    for (const tile of childTiles()) {
+      expect(tile && T.store.fresh(tile)).toBe(true);
+    }
+  });
+
+  it("L+1 не влезает в бюджет — не ставится, экран не выгоняется", () => {
+    iosFlag.value = true; // бюджет 80
+    try {
+      const { scene, renderer } = makeScene();
+      // зум чуть больше 1 — уровень 1: экран 4×4, кольцо 20, L+1 — 8×8 = 64
+      const zoomed = { zoom: { value: 1.01 as NormalizedZoomValue } };
+      frameOf(scene, renderer, zoomed);
+      T.work(performance.now() + 1e9);
+      frameOf(scene, renderer, zoomed);
+      expect(T.queue().some((q) => q.level === 2)).toBe(false);
+      expect([...T.store.tiles.values()].some((x) => x.level === 2)).toBe(
+        false,
+      );
+      for (let tx = 0; tx <= 3; tx++) {
+        for (let ty = 0; ty <= 3; ty++) {
+          const tile = T.store.tiles.get(tileKey(1, tx, ty));
+          expect(tile && T.store.fresh(tile)).toBe(true);
+        }
+      }
+    } finally {
+      iosFlag.value = false;
+    }
+  });
+
+  it("L+1 помечен нужным в кадре простоя — evict его не выгоняет", () => {
+    const { scene, renderer } = makeScene();
+    frameOf(scene, renderer);
+    T.work(performance.now() + 1e9);
+    // посторонние тайлы «свежее любого кадра»: без пометки выгнали бы L+1;
+    // экран + кольцо + L+1 = 32, всего на 5 больше бюджета
+    for (let i = 0; i < TILE_BUDGET - 32 + 5; i++) {
+      const t = T.store.tile(0, 100 + i, 0);
+      t.canvas = document.createElement("canvas");
+      t.lastUsed = 1e9;
+    }
+    frameOf(scene, renderer); // кадр простоя
+    const now = T.store.tiles.get(tileKey(0, 0, 0))!.lastUsed;
+    T.store.evict(now);
+    for (const tile of childTiles()) {
+      expect(tile?.canvas).toBeTruthy();
+    }
+  });
+
   it("правка одного прямоугольника — живой только он", () => {
     const { els, scene, renderer } = makeScene();
     frameOf(scene, renderer);
