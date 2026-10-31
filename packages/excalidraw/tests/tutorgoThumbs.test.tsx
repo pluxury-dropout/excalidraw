@@ -341,6 +341,20 @@ describe("tutorgo: обрезка по миниатюре не стартует"
       expect(ensure).not.toHaveBeenCalled();
     },
   );
+
+  it("undo не возвращает обрезку на картинку с миниатюрой", async () => {
+    await setup(false);
+    mouse.doubleClickOn(img);
+    expect(window.h.state.croppingElementId).toBe(img.id);
+    Keyboard.keyDown(KEYS.ESCAPE);
+    expect(window.h.state.croppingElementId).toBe(null);
+
+    // хост подменил полную миниатюрой; undo вернул бы режим обрезки по ней
+    window.h.app.files = { [A]: fileOf("data:x", true) };
+    Keyboard.undo();
+    expect(window.h.state.croppingElementId).toBe(null);
+    expect(ensure).toHaveBeenCalledWith([A]);
+  });
 });
 
 // tutorgo: §4.4 — экспорт и копирование рисуют только полные версии.
@@ -421,6 +435,15 @@ describe("tutorgo: экспорт ждёт полные", () => {
     expect(exp.canvasFiles[0][A].dataURL).toBe("data:full");
     expect(exp.canvasFiles[0][B].dataURL).toBe("data:fullB");
     expect(window.h.state.errorMessage).toBe(null);
+  });
+
+  it("Копировать как PNG: действия за время загрузки не откатываются", async () => {
+    API.executeAction(actionCopyAsPng);
+    API.setAppState({ scrollX: 777, selectedElementIds: { [elA.id]: true } });
+    await swapToFullAndResolve();
+    await waitFor(() => expect(window.h.state.toast).not.toBe(null));
+    expect(window.h.state.scrollX).toBe(777);
+    expect(window.h.state.selectedElementIds).toEqual({ [elA.id]: true });
   });
 
   it("Копировать как PNG: ensure отклонён — ошибка, PNG не записан", async () => {

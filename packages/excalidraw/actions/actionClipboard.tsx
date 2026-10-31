@@ -225,9 +225,10 @@ export const actionCopyAsPng = register({
           name: app.getName(),
         },
       );
+      // tutorgo: без ...appState — между кликом и ответом идёт загрузка полных,
+      // снимок откатил бы скролл/зум/выделение, сделанные за это время
       return {
         appState: {
-          ...appState,
           toast: {
             message: t("toast.copyToClipboardAsPng", {
               exportSelection: selectedElements.length
@@ -245,8 +246,7 @@ export const actionCopyAsPng = register({
       console.error(error);
       return {
         appState: {
-          ...appState,
-          errorMessage: error.message,
+          errorMessage: error.message, // tutorgo: без ...appState, см. выше
         },
         captureUpdate: CaptureUpdateAction.EVENTUALLY,
       };

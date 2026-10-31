@@ -2713,6 +2713,20 @@ class App extends React.Component<AppProps, AppState> {
       this.setState({ showWelcomeScreen: true });
     }
 
+    // tutorgo: обрезка никогда не считается по миниатюре — и когда режим вернул
+    // undo/redo (croppingElementId в истории), и когда хост подменил полную
+    // миниатюрой посреди обрезки. Выходим и просим полную (см. tutorgoCanCrop).
+    const tutorgoCropping =
+      this.state.croppingElementId &&
+      this.scene.getElement(this.state.croppingElementId);
+    if (
+      tutorgoCropping &&
+      isImageElement(tutorgoCropping) &&
+      !this.tutorgoCanCrop(tutorgoCropping)
+    ) {
+      this.setState({ croppingElementId: null });
+    }
+
     if (
       prevProps.UIOptions.dockedSidebarBreakpoint !==
       this.props.UIOptions.dockedSidebarBreakpoint
