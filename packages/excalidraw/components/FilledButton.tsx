@@ -30,6 +30,8 @@ export type FilledButtonProps = {
   fullWidth?: boolean;
 
   icon?: React.ReactNode;
+  /** tutorgo: выключить снаружи (экспорт ждёт полные версии картинок) */
+  disabled?: boolean;
 };
 
 export const FilledButton = forwardRef<HTMLButtonElement, FilledButtonProps>(
@@ -45,6 +47,7 @@ export const FilledButton = forwardRef<HTMLButtonElement, FilledButtonProps>(
       fullWidth,
       className,
       status,
+      disabled, // tutorgo
     },
     ref,
   ) => {
@@ -91,7 +94,9 @@ export const FilledButton = forwardRef<HTMLButtonElement, FilledButtonProps>(
         type="button"
         aria-label={label}
         ref={ref}
-        disabled={_status === "loading" || _status === "success"}
+        disabled={
+          disabled || _status === "loading" || _status === "success" // tutorgo
+        }
       >
         <div className="ExcButton__contents">
           {_status === "loading" ? (

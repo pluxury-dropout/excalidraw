@@ -52,6 +52,7 @@ const ExcalidrawBase = (props: ExcalidrawProps) => {
     renderEmbeddable,
     aiEnabled,
     showDeprecatedFonts,
+    tutorgoEnsureFullFiles, // tutorgo
   } = props;
 
   const canvasActions = props.UIOptions?.canvasActions;
@@ -144,6 +145,7 @@ const ExcalidrawBase = (props: ExcalidrawProps) => {
           renderEmbeddable={renderEmbeddable}
           aiEnabled={aiEnabled !== false}
           showDeprecatedFonts={showDeprecatedFonts}
+          tutorgoEnsureFullFiles={tutorgoEnsureFullFiles} // tutorgo
         >
           {children}
         </App>

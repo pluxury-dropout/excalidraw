@@ -10,10 +10,14 @@ import {
   MIME_TYPES,
 } from "../constants";
 import { getNonDeletedElements } from "../element";
-import { isFrameLikeElement } from "../element/typeChecks";
+import {
+  isFrameLikeElement,
+  isInitializedImageElement,
+} from "../element/typeChecks";
 import type {
   ExcalidrawElement,
   ExcalidrawFrameLikeElement,
+  FileId,
   NonDeletedExcalidrawElement,
 } from "../element/types";
 import { getElementsOverlappingFrame } from "../frame";
@@ -21,7 +25,7 @@ import { t } from "../i18n";
 import { getSelectedElements, isSomeElementSelected } from "../scene";
 import { exportToCanvas, exportToSvg } from "../scene/export";
 import type { ExportType } from "../scene/types";
-import type { AppState, BinaryFiles } from "../types";
+import type { AppClassProperties, AppState, BinaryFiles } from "../types";
 import { cloneJSON } from "../utils";
 import { canvasToBlob } from "./blob";
 import type { FileSystemHandle } from "./filesystem";
@@ -82,11 +86,35 @@ export const prepareElementsForExport = (
   };
 };
 
+/** tutorgo: id файлов картинок среди elements, без повторов. */
+export const tutorgoImageFileIds = (
+  elements: readonly ExcalidrawElement[],
+): FileId[] => [
+  ...new Set(elements.filter(isInitializedImageElement).map((e) => e.fileId)),
+];
+
+/**
+ * tutorgo: files с полными версиями картинок elements (не миниатюрами). Без
+ * пропа tutorgoEnsureFullFiles или без картинок — app.files как есть (апстрим).
+ * Иначе промис app.files, прочитанный ПОСЛЕ резолва: подмена пересоздаёт объект.
+ */
+export const tutorgoFullFiles = (
+  app: AppClassProperties,
+  elements: readonly ExcalidrawElement[],
+): BinaryFiles | Promise<BinaryFiles> => {
+  const ensure = app.props.tutorgoEnsureFullFiles;
+  const ids = tutorgoImageFileIds(elements);
+  return ensure && ids.length ? ensure(ids).then(() => app.files) : app.files;
+};
+
 export const exportCanvas = async (
   type: Omit<ExportType, "backend">,
   elements: ExportedElements,
   appState: AppState,
-  files: BinaryFiles,
+  // tutorgo: может быть промисом (tutorgoFullFiles) — тогда рисуем в цепочке,
+  // а запись в буфер (ClipboardItem) создаётся в том же тике: Safari теряет
+  // жест пользователя после await.
+  files: BinaryFiles | Promise<BinaryFiles>,
   {
     exportBackground,
     exportPadding = DEFAULT_EXPORT_PADDING,
@@ -108,18 +136,21 @@ export const exportCanvas = async (
     throw new Error(t("alerts.cannotExportEmptyCanvas"));
   }
   if (type === "svg" || type === "clipboard-svg") {
-    const svgPromise = exportToSvg(
-      elements,
-      {
-        exportBackground,
-        exportWithDarkMode: appState.exportWithDarkMode,
-        viewBackgroundColor,
-        exportPadding,
-        exportScale: appState.exportScale,
-        exportEmbedScene: appState.exportEmbedScene && type === "svg",
-      },
-      files,
-      { exportingFrame },
+    // tutorgo: files через Promise.resolve — см. параметр
+    const svgPromise = Promise.resolve(files).then((files) =>
+      exportToSvg(
+        elements,
+        {
+          exportBackground,
+          exportWithDarkMode: appState.exportWithDarkMode,
+          viewBackgroundColor,
+          exportPadding,
+          exportScale: appState.exportScale,
+          exportEmbedScene: appState.exportEmbedScene && type === "svg",
+        },
+        files,
+        { exportingFrame },
+      ),
     );
 
     if (type === "svg") {
@@ -146,22 +177,26 @@ export const exportCanvas = async (
     }
   }
 
-  const tempCanvas = exportToCanvas(elements, appState, files, {
-    exportBackground,
-    viewBackgroundColor,
-    exportPadding,
-    exportingFrame,
-  });
+  // tutorgo: files через Promise.resolve — см. параметр; canvasToBlob ждёт промис
+  const tempCanvas = Promise.resolve(files).then((files) =>
+    exportToCanvas(elements, appState, files, {
+      exportBackground,
+      viewBackgroundColor,
+      exportPadding,
+      exportingFrame,
+    }),
+  );
 
   if (type === "png") {
     let blob = canvasToBlob(tempCanvas);
 
     if (appState.exportEmbedScene) {
       blob = blob.then((blob) =>
-        import("./image").then(({ encodePngMetadata }) =>
+        import("./image").then(async ({ encodePngMetadata }) =>
           encodePngMetadata({
             blob,
-            metadata: serializeAsJSON(elements, appState, files, "local"),
+            // tutorgo: await — files может быть промисом
+            metadata: serializeAsJSON(elements, appState, await files, "local"),
           }),
         ),
       );

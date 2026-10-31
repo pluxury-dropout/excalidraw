@@ -1,7 +1,12 @@
 import React, { useEffect, useRef, useState } from "react";
 
 import type { ActionManager } from "../actions/manager";
-import type { AppClassProperties, BinaryFiles, UIAppState } from "../types";
+import type {
+  AppClassProperties,
+  BinaryFiles,
+  ExcalidrawProps,
+  UIAppState,
+} from "../types";
 
 import {
   actionExportWithDarkMode,
@@ -20,7 +25,7 @@ import {
 
 import { canvasToBlob } from "../data/blob";
 import { nativeFileSystemSupported } from "../data/filesystem";
-import type { NonDeletedExcalidrawElement } from "../element/types";
+import type { FileId, NonDeletedExcalidrawElement } from "../element/types";
 import { t } from "../i18n";
 import { isSomeElementSelected } from "../scene";
 import { exportToCanvas } from "@excalidraw/utils/export";
@@ -34,7 +39,7 @@ import { Tooltip } from "./Tooltip";
 import "./ImageExportDialog.scss";
 import { FilledButton } from "./FilledButton";
 import { cloneJSON } from "../utils";
-import { prepareElementsForExport } from "../data";
+import { prepareElementsForExport, tutorgoImageFileIds } from "../data";
 import { useCopyStatus } from "../hooks/useCopiedIndicator";
 
 const supportsContextFilters =
@@ -59,6 +64,7 @@ type ImageExportModalProps = {
   actionManager: ActionManager;
   onExportImage: AppClassProperties["onExportImage"];
   name: string;
+  ensureFullFiles?: ExcalidrawProps["tutorgoEnsureFullFiles"]; // tutorgo
 };
 
 const ImageExportModal = ({
@@ -68,6 +74,7 @@ const ImageExportModal = ({
   actionManager,
   onExportImage,
   name,
+  ensureFullFiles,
 }: ImageExportModalProps) => {
   const hasSelection = isSomeElementSelected(
     elementsSnapshot,
@@ -111,10 +118,36 @@ const ImageExportModal = ({
     exportSelectionOnly,
   );
 
+  // tutorgo: превью и кнопки — только когда у картинок экспорта в files полные
+  // версии, не миниатюры. Ключ — набор fileId: «только выделенное» его меняет.
+  // Сами files приходят пропом (App перерисовывается на подмене).
+  const fullKey = ensureFullFiles
+    ? tutorgoImageFileIds(exportedElements).join("\n")
+    : "";
+  const [readyKey, setReadyKey] = useState<string | null>(null);
+  const [fullError, setFullError] = useState<Error | null>(null);
+  const fullReady = !fullKey || readyKey === fullKey;
+  useEffect(() => {
+    if (!fullKey || !ensureFullFiles) {
+      return;
+    }
+    let alive = true;
+    setFullError(null);
+    ensureFullFiles(fullKey.split("\n") as FileId[]).then(
+      () => alive && setReadyKey(fullKey),
+      (error) =>
+        alive &&
+        setFullError(error instanceof Error ? error : new Error(String(error))),
+    );
+    return () => {
+      alive = false;
+    };
+  }, [ensureFullFiles, fullKey]);
+
   useEffect(() => {
     const previewNode = previewRef.current;
-    if (!previewNode) {
-      return;
+    if (!previewNode || !fullReady) {
+      return; // tutorgo: !fullReady — миниатюру в превью не рисуем
     }
     const maxWidth = previewNode.offsetWidth;
     const maxHeight = previewNode.offsetHeight;
@@ -166,6 +199,7 @@ const ImageExportModal = ({
     exportDarkMode,
     exportScale,
     embedScene,
+    fullReady, // tutorgo
   ]);
 
   return (
@@ -174,6 +208,13 @@ const ImageExportModal = ({
       <div className="ImageExportModal__preview">
         <div className="ImageExportModal__preview__canvas" ref={previewRef}>
           {renderError && <ErrorCanvasPreview />}
+          {/* tutorgo: полные версии не догрузились */}
+          {fullError && (
+            <div>
+              <h3>{t("canvasError.cannotShowPreview")}</h3>
+              <p>{fullError.message}</p>
+            </div>
+          )}
         </div>
         <div className="ImageExportModal__preview__filename">
           {!nativeFileSystemSupported && (
@@ -292,6 +333,7 @@ const ImageExportModal = ({
               })
             }
             icon={downloadIcon}
+            disabled={!fullReady} // tutorgo
           >
             {t("imageExportDialog.button.exportToPng")}
           </FilledButton>
@@ -304,6 +346,7 @@ const ImageExportModal = ({
               })
             }
             icon={downloadIcon}
+            disabled={!fullReady} // tutorgo
           >
             {t("imageExportDialog.button.exportToSvg")}
           </FilledButton>
@@ -323,6 +366,7 @@ const ImageExportModal = ({
                 onCopy();
               }}
               icon={copyIcon}
+              disabled={!fullReady} // tutorgo
             >
               {t("imageExportDialog.button.copyPngToClipboard")}
             </FilledButton>
@@ -374,6 +418,7 @@ export const ImageExportDialog = ({
   onExportImage,
   onCloseRequest,
   name,
+  ensureFullFiles,
 }: {
   appState: UIAppState;
   elements: readonly NonDeletedExcalidrawElement[];
@@ -382,6 +427,7 @@ export const ImageExportDialog = ({
   onExportImage: AppClassProperties["onExportImage"];
   onCloseRequest: () => void;
   name: string;
+  ensureFullFiles?: ExcalidrawProps["tutorgoEnsureFullFiles"]; // tutorgo
 }) => {
   // we need to take a snapshot so that the exported state can't be modified
   // while the dialog is open
@@ -401,6 +447,7 @@ export const ImageExportDialog = ({
         actionManager={actionManager}
         onExportImage={onExportImage}
         name={name}
+        ensureFullFiles={ensureFullFiles} // tutorgo
       />
     </Dialog>
   );

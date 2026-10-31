@@ -9,7 +9,11 @@ import {
   readSystemClipboard,
 } from "../clipboard";
 import { actionDeleteSelected } from "./actionDeleteSelected";
-import { exportCanvas, prepareElementsForExport } from "../data/index";
+import {
+  exportCanvas,
+  prepareElementsForExport,
+  tutorgoFullFiles,
+} from "../data/index";
 import { getTextFromElements, isTextElement } from "../element";
 import { t } from "../i18n";
 import { isFirefox } from "../constants";
@@ -140,7 +144,7 @@ export const actionCopyAsSvg = register({
         "clipboard-svg",
         exportedElements,
         appState,
-        app.files,
+        tutorgoFullFiles(app, exportedElements), // tutorgo: только полные
         {
           ...appState,
           exportingFrame,
@@ -208,14 +212,23 @@ export const actionCopyAsPng = register({
       true,
     );
     try {
-      await exportCanvas("clipboard", exportedElements, appState, app.files, {
-        ...appState,
-        exportingFrame,
-        name: app.getName(),
-      });
+      // tutorgo: только полные; промис уходит в exportCanvas без await — запись
+      // в буфер начинается в этом же тике (жест пользователя в Safari)
+      await exportCanvas(
+        "clipboard",
+        exportedElements,
+        appState,
+        tutorgoFullFiles(app, exportedElements),
+        {
+          ...appState,
+          exportingFrame,
+          name: app.getName(),
+        },
+      );
+      // tutorgo: без ...appState — между кликом и ответом идёт загрузка полных,
+      // снимок откатил бы скролл/зум/выделение, сделанные за это время
       return {
         appState: {
-          ...appState,
           toast: {
             message: t("toast.copyToClipboardAsPng", {
               exportSelection: selectedElements.length
@@ -233,8 +246,7 @@ export const actionCopyAsPng = register({
       console.error(error);
       return {
         appState: {
-          ...appState,
-          errorMessage: error.message,
+          errorMessage: error.message, // tutorgo: без ...appState, см. выше
         },
         captureUpdate: CaptureUpdateAction.EVENTUALLY,
       };

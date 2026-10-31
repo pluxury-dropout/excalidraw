@@ -445,8 +445,18 @@ const drawElementOnCanvas = (
           context.clip();
         }
 
-        const { x, y, width, height } = element.crop
-          ? element.crop
+        // tutorgo: кроп — в пикселях оригинала, а в кэше может быть миниатюра:
+        // переводим в пиксели того, что рисуем (у полной множитель 1).
+        const crop = element.crop;
+        const sx = crop ? img.naturalWidth / crop.naturalWidth : 1;
+        const sy = crop ? img.naturalHeight / crop.naturalHeight : 1;
+        const { x, y, width, height } = crop
+          ? {
+              x: crop.x * sx,
+              y: crop.y * sy,
+              width: crop.width * sx,
+              height: crop.height * sy,
+            }
           : {
               x: 0,
               y: 0,

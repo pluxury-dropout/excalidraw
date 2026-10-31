@@ -19,6 +19,11 @@ export const actionToggleCropEditor = register({
       includeBoundTextElement: true,
     })[0] as ExcalidrawImageElement;
 
+    // tutorgo: по миниатюре обрезку не открываем (см. App.tutorgoCanCrop)
+    if (!app.tutorgoCanCrop(selectedElement)) {
+      return false;
+    }
+
     return {
       appState: {
         ...appState,

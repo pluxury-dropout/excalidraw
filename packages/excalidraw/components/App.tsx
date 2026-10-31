@@ -419,6 +419,7 @@ import { AnimatedTrail } from "../animated-trail";
 import { LaserTrails } from "../laser-trails";
 import { withBatchedUpdates, withBatchedUpdatesThrottled } from "../reactUtils";
 import { getRenderOpacity } from "../renderer/renderElement";
+import { tutorgoTilesFileReplaced } from "../renderer/tutorgoTiles"; // tutorgo
 import {
   hitElementBoundText,
   hitElementBoundingBoxOnly,
@@ -720,6 +721,7 @@ class App extends React.Component<AppProps, AppState> {
         updateScene: this.updateScene,
         updateLibrary: this.library.updateLibrary,
         addFiles: this.addFiles,
+        tutorgoReplaceFiles: this.tutorgoReplaceFiles, // tutorgo: миниатюра ↔ полная
         resetScene: this.resetScene,
         getSceneElementsIncludingDeleted: this.getSceneElementsIncludingDeleted,
         history: {
@@ -2711,6 +2713,20 @@ class App extends React.Component<AppProps, AppState> {
       this.setState({ showWelcomeScreen: true });
     }
 
+    // tutorgo: обрезка никогда не считается по миниатюре — и когда режим вернул
+    // undo/redo (croppingElementId в истории), и когда хост подменил полную
+    // миниатюрой посреди обрезки. Выходим и просим полную (см. tutorgoCanCrop).
+    const tutorgoCropping =
+      this.state.croppingElementId &&
+      this.scene.getElement(this.state.croppingElementId);
+    if (
+      tutorgoCropping &&
+      isImageElement(tutorgoCropping) &&
+      !this.tutorgoCanCrop(tutorgoCropping)
+    ) {
+      this.setState({ croppingElementId: null });
+    }
+
     if (
       prevProps.UIOptions.dockedSidebarBreakpoint !==
       this.props.UIOptions.dockedSidebarBreakpoint
@@ -3843,6 +3859,67 @@ class App extends React.Component<AppProps, AppState> {
       this.addNewImagesToImageCache();
     },
   );
+
+  /** tutorgo: номер последней подмены файла — выигрывает последняя, а не та, что
+   * раскодировалась позже. */
+  private tutorgoReplaceSeq = new Map<FileId, number>();
+
+  /**
+   * tutorgo: подмена версии файла (миниатюра ↔ полная) без мигания. Новая
+   * раскодируется ДО подмены — до тех пор в imageCache и files старая (не через
+   * удаление записи: Promise в кэше = заглушка на экране). Неизвестные id — как
+   * addFiles. Возвращает id, чьё раскодирование упало: у них осталась старая.
+   */
+  public tutorgoReplaceFiles: ExcalidrawImperativeAPI["tutorgoReplaceFiles"] =
+    async (files) => {
+      const known = files.filter((f) => this.files[f.id]);
+      const fresh = files.filter((f) => !this.files[f.id]);
+      if (fresh.length) {
+        this.addFiles(fresh);
+      }
+      const failed: FileId[] = [];
+      let replaced = false;
+      await Promise.all(
+        known.map(async (data) => {
+          const n = (this.tutorgoReplaceSeq.get(data.id) ?? 0) + 1;
+          this.tutorgoReplaceSeq.set(data.id, n);
+          if (data.mimeType === MIME_TYPES.binary) {
+            failed.push(data.id); // не картинка — в imageCache ей не место
+            return;
+          }
+          let image: HTMLImageElement;
+          try {
+            image = await loadHTMLImageElement(data.dataURL);
+          } catch {
+            failed.push(data.id);
+            return;
+          }
+          // старая ещё грузится (addFiles) — дождаться, иначе она перетрёт новую
+          const prev = this.imageCache.get(data.id)?.image;
+          if (prev instanceof Promise) {
+            await prev.catch(() => {});
+          }
+          if (this.tutorgoReplaceSeq.get(data.id) !== n || this.unmounted) {
+            return; // есть подмена новее
+          }
+          this.files = { ...this.files, [data.id]: data };
+          this.imageCache.set(data.id, { image, mimeType: data.mimeType });
+          const ids: string[] = [];
+          for (const el of this.scene.getNonDeletedElements()) {
+            if (isInitializedImageElement(el) && el.fileId === data.id) {
+              ShapeCache.delete(el);
+              ids.push(el.id);
+            }
+          }
+          tutorgoTilesFileReplaced(data.id, ids);
+          replaced = true;
+        }),
+      );
+      if (replaced) {
+        this.scene.triggerUpdate();
+      }
+      return failed;
+    };
 
   private addMissingFiles = (
     files: BinaryFiles | BinaryFileData[],
@@ -5352,7 +5429,25 @@ class App extends React.Component<AppProps, AppState> {
     }
   };
 
+  /**
+   * tutorgo: кроп считается в пикселях оригинала (naturalWidth образа в кэше) —
+   * по миниатюре вышел бы не тот кусок, и он ушёл бы по WS всем. Пока в кэше
+   * миниатюра — не входим и просим хост догрузить полную (без ожидания: после
+   * подмены повторная попытка пройдёт).
+   */
+  public tutorgoCanCrop = (image: ExcalidrawImageElement) => {
+    const fileId = image.fileId;
+    if (!fileId || !this.files[fileId]?.tutorgoThumb) {
+      return true;
+    }
+    this.props.tutorgoEnsureFullFiles?.([fileId]).catch(() => {});
+    return false;
+  };
+
   private startImageCropping = (image: ExcalidrawImageElement) => {
+    if (!this.tutorgoCanCrop(image)) {
+      return; // tutorgo: Enter и двойной клик идут сюда
+    }
     this.store.shouldCaptureIncrement();
     this.setState({
       croppingElementId: image.id,

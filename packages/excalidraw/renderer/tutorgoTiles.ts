@@ -447,6 +447,16 @@ export class TileStore {
     }
   }
 
+  /** tutorgo: перерисовать тайлы по границам элементов (подменили файл картинки). */
+  invalidateElements(ids: readonly Id[]) {
+    for (const id of ids) {
+      const b = this.index?.bounds(id);
+      if (b) {
+        this.invalidate(b, this.pads.get(id) ?? 0, ++this.seq);
+      }
+    }
+  }
+
   invalidateAll() {
     const seq = ++this.seq;
     for (const t of this.tiles.values()) {
@@ -1332,6 +1342,22 @@ const pump = (config: StaticSceneRenderConfig, deadline: number) => {
 
 /** Уход с доски (Renderer.destroy): холсты тайлов и старая сцена не держатся. */
 export const tutorgoTilesReset = resetAll;
+
+/**
+ * tutorgo: у файла новая версия (миниатюра ↔ полная): LOD-копия и тайлы, запечённые
+ * со старой, устарели на всех уровнях.
+ */
+export const tutorgoTilesFileReplaced = (
+  fileId: string,
+  elementIds: readonly string[],
+) => {
+  const lod = lods.get(fileId);
+  if (lod) {
+    lods.delete(fileId);
+    lod.width = lod.height = 0; // сразу вернуть память холста
+  }
+  store.invalidateElements(elementIds);
+};
 
 /** Только для тестов: включить без localStorage и прогнать насос синхронно. */
 export const __tutorgoTilesForTests = {

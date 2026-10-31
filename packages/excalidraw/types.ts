@@ -113,6 +113,11 @@ export type BinaryFileData = {
    * the file dataURL has changed e.g. as part of restore due to schema update.
    */
   version?: number;
+  /** tutorgo: адрес оригинала в files-карте доски — хост ставит на каждый свой
+   * файл; едет в буфер обмена вместе с файлом. */
+  tutorgoUrl?: string;
+  /** tutorgo: в files и imageCache сейчас миниатюра, не оригинал. */
+  tutorgoThumb?: true;
 };
 
 export type BinaryFileMetadata = Omit<BinaryFileData, "dataURL">;
@@ -591,6 +596,20 @@ export interface ExcalidrawProps {
   ) => JSX.Element | null;
   aiEnabled?: boolean;
   showDeprecatedFonts?: boolean;
+  /** tutorgo: догрузить полные версии файлов (вместо миниатюр). Резолв = в
+   * `app.files` у этих id полные; reject — экспорт показывает ошибку и миниатюру
+   * не отдаёт. Зовут экспорт (диалог, «Копировать как PNG/SVG») и обрезка.
+   * Без пропа — поведение апстрима.
+   *
+   * Требования к хосту:
+   * - резолвить только после подмены (`api.tutorgoReplaceFiles`); подмена не
+   *   удалась (id в её ответе, сеть) — reject, а не резолв с миниатюрой;
+   * - держать полные, пока открыт диалог экспорта
+   *   (`appState.openDialog?.name === "imageExport"`): кнопки диалога рисуют из
+   *   `app.files` в момент клика, выгрузка вернёт в экспорт миниатюру;
+   * - стабильная ссылка (`useCallback`): проп в зависимостях эффекта диалога,
+   *   новая функция на каждый рендер = лишние вызовы. */
+  tutorgoEnsureFullFiles?: (fileIds: FileId[]) => Promise<void>;
 }
 
 export type SceneData = {
@@ -711,6 +730,7 @@ export type AppClassProperties = {
   excalidrawContainerValue: App["excalidrawContainerValue"];
 
   onPointerUpEmitter: App["onPointerUpEmitter"];
+  tutorgoCanCrop: App["tutorgoCanCrop"]; // tutorgo
 };
 
 export type PointerDownState = Readonly<{
@@ -794,6 +814,10 @@ export interface ExcalidrawImperativeAPI {
   refresh: InstanceType<typeof App>["refresh"];
   setToast: InstanceType<typeof App>["setToast"];
   addFiles: (data: BinaryFileData[]) => void;
+  /** tutorgo: подменяет версию известных файлов (миниатюра ↔ полная) без
+   * мигания, неизвестные добавляет как addFiles. Резолвится после подмены всех;
+   * возвращает id, чьё раскодирование упало (у них осталась старая версия). */
+  tutorgoReplaceFiles: (data: BinaryFileData[]) => Promise<FileId[]>;
   id: string;
   setActiveTool: InstanceType<typeof App>["setActiveTool"];
   setCursor: InstanceType<typeof App>["setCursor"];
