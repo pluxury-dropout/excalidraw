@@ -181,6 +181,7 @@ const LayerUI = ({
         onExportImage={onExportImage}
         onCloseRequest={() => setAppState({ openDialog: null })}
         name={app.getName()}
+        ensureFullFiles={app.props.tutorgoEnsureFullFiles} // tutorgo
       />
     );
   };

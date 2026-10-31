@@ -5415,7 +5415,25 @@ class App extends React.Component<AppProps, AppState> {
     }
   };
 
+  /**
+   * tutorgo: кроп считается в пикселях оригинала (naturalWidth образа в кэше) —
+   * по миниатюре вышел бы не тот кусок, и он ушёл бы по WS всем. Пока в кэше
+   * миниатюра — не входим и просим хост догрузить полную (без ожидания: после
+   * подмены повторная попытка пройдёт).
+   */
+  public tutorgoCanCrop = (image: ExcalidrawImageElement) => {
+    const fileId = image.fileId;
+    if (!fileId || !this.files[fileId]?.tutorgoThumb) {
+      return true;
+    }
+    this.props.tutorgoEnsureFullFiles?.([fileId]).catch(() => {});
+    return false;
+  };
+
   private startImageCropping = (image: ExcalidrawImageElement) => {
+    if (!this.tutorgoCanCrop(image)) {
+      return; // tutorgo: Enter и двойной клик идут сюда
+    }
     this.store.shouldCaptureIncrement();
     this.setState({
       croppingElementId: image.id,

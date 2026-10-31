@@ -596,6 +596,11 @@ export interface ExcalidrawProps {
   ) => JSX.Element | null;
   aiEnabled?: boolean;
   showDeprecatedFonts?: boolean;
+  /** tutorgo: догрузить полные версии файлов (вместо миниатюр). Резолв = в
+   * `app.files` у этих id полные; reject — экспорт показывает ошибку и миниатюру
+   * не отдаёт. Зовут экспорт (диалог, «Копировать как PNG/SVG») и обрезка.
+   * Без пропа — поведение апстрима. */
+  tutorgoEnsureFullFiles?: (fileIds: FileId[]) => Promise<void>;
 }
 
 export type SceneData = {
@@ -716,6 +721,7 @@ export type AppClassProperties = {
   excalidrawContainerValue: App["excalidrawContainerValue"];
 
   onPointerUpEmitter: App["onPointerUpEmitter"];
+  tutorgoCanCrop: App["tutorgoCanCrop"]; // tutorgo
 };
 
 export type PointerDownState = Readonly<{
