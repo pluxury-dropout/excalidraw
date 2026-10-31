@@ -72,6 +72,16 @@ const createESMRawBuild = async () => {
     ...getConfig("dist/prod"),
     ...chunksConfig,
   });
+
+  // tutorgo: страница рендера archiver'а — один самодостаточный ESM-файл
+  // (без external-пакетов и сплиттинга: у страницы нет сети) + fonts/ рядом.
+  await buildProd({
+    ...getConfig("dist/render"),
+    packages: undefined,
+    splitting: false,
+    entryPoints: ["tutorgoRender.ts"],
+    entryNames: "[name]",
+  });
 };
 
 (async () => {
