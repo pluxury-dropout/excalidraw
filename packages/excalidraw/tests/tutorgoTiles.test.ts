@@ -718,6 +718,26 @@ describe("tutorgo: тайлы — рисование", () => {
     }
   });
 
+  it("чистые тайлы (без элементов) в композит не копируются", () => {
+    const one = rect(10, 10); // только тайл 0:0:0, остальные три экрана пусты
+    const scene = new Scene();
+    scene.replaceAllElements(syncInvalidIndices([one]));
+    const renderer = new Renderer(scene);
+    frameOf(scene, renderer);
+    T.work(performance.now() + 1e9);
+    const draw = vi.spyOn(CanvasRenderingContext2D.prototype, "drawImage");
+    try {
+      frameOf(scene, renderer);
+      const tile = T.store.tiles.get(tileKey(0, 0, 0))!;
+      expect(draw.mock.calls.map((c) => c[0])).toEqual([tile.canvas]);
+      expect(
+        screenTiles().filter((t) => t && T.store.fresh(t) && t.blank).length,
+      ).toBe(3);
+    } finally {
+      draw.mockRestore();
+    }
+  });
+
   it("правка одного прямоугольника — живой только он", () => {
     const { els, scene, renderer } = makeScene();
     frameOf(scene, renderer);
@@ -955,6 +975,12 @@ describe("tutorgo: тайлы — рисование", () => {
             step,
             key: t.key,
             els: T.expected(t.key),
+          });
+          // tutorgo: чистый ⇔ ни одного элемента — иначе композит потеряет штрих
+          expect({ step, key: t.key, blank: t.blank }).toEqual({
+            step,
+            key: t.key,
+            blank: T.painted(t.key).length === 0,
           });
         }
       }

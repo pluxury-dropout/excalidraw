@@ -80,6 +80,12 @@ export type Tile = {
   lastUsed: number;
   /** Только в тестах: что нарисовано в тайле, в порядке рисования. */
   painted: Painted[];
+  /**
+   * tutorgo: на холсте ни одного элемента — он прозрачный, композит его
+   * пропускает. На лёгкой доске пусты почти все тайлы экрана, а копия 512² на
+   * каждый кадр пана/зума — основная цена кадра (Firefox, экраны с dpr 2).
+   */
+  blank: boolean;
 };
 
 export type Painted = { id: string; version: number };
@@ -480,6 +486,7 @@ export class TileStore {
         maxIndex: null,
         lastUsed: 0,
         painted: [],
+        blank: true,
       };
       this.tiles.set(key, t);
     }
@@ -561,6 +568,7 @@ type Job = TilePos & {
   seq: number;
   maxIndex: string | null;
   painted: Painted[];
+  blank: boolean;
   /** Конфиг кадра, в котором работа началась: камера тайла — от него. */
   start: StaticSceneRenderConfig;
 };
@@ -704,6 +712,10 @@ const drawFallback = (
     const parent = store.tiles.get(tileKey(pos.level - p, px, py));
     if (parent?.canvas) {
       parent.lastUsed = frame;
+      found = true;
+      if (parent.blank) {
+        continue;
+      }
       const sub = TILE_PX / n;
       context.drawImage(
         parent.canvas,
@@ -716,7 +728,6 @@ const drawFallback = (
         dw,
         dh,
       );
-      found = true;
     }
   }
   for (let i = 0; i < 2; i++) {
@@ -729,7 +740,9 @@ const drawFallback = (
       const t = store.tiles.get(tileKey(child.level, child.tx, child.ty));
       if (t?.canvas) {
         t.lastUsed = frame;
-        context.drawImage(t.canvas, ...destRect(child, appState, f));
+        if (!t.blank) {
+          context.drawImage(t.canvas, ...destRect(child, appState, f));
+        }
         found = true;
       }
     }
@@ -859,7 +872,9 @@ const drawTiles = (
         }
         if (t?.canvas) {
           t.lastUsed = frame;
-          context.drawImage(t.canvas, ...destRect(pos, appState, f));
+          if (!t.blank) {
+            context.drawImage(t.canvas, ...destRect(pos, appState, f));
+          }
         } else if (!drawFallback(context, pos, appState, f)) {
           hole = true;
         }
@@ -1203,6 +1218,7 @@ const startJob = (
     seq: store.seq,
     maxIndex: null,
     painted: [],
+    blank: true,
   };
 };
 
@@ -1232,6 +1248,7 @@ const paintJob = (
         return !fresh || store.isHot(el.id) ? null : fresh;
       },
       onPainted: (el) => {
+        j.blank = false;
         if (JOURNAL) {
           j.painted.push({ id: el.id, version: el.version });
         }
@@ -1252,6 +1269,7 @@ const commit = (j: Job) => {
   t.contentSeq = j.seq;
   t.maxIndex = j.maxIndex;
   t.painted = j.painted;
+  t.blank = j.blank;
   t.lastUsed = frame;
   if (old) {
     release([old]);
@@ -1274,6 +1292,7 @@ const appendOne = (
     roughOf.set(t.canvas, (rc = rough.canvas(t.canvas)));
   }
   paintTile(t.canvas.getContext("2d")!, rc, config, t, [el]);
+  t.blank = false;
   if (JOURNAL) {
     t.painted.push({ id, version: el.version });
   }
