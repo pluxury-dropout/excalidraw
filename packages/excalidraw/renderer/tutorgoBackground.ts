@@ -52,16 +52,19 @@ export const strokeTutorgoBackground = (
       const s = coarse ? step * 2 : step;
       const startX = (scrollX % s) - s;
       const startY = (scrollY % s) - s;
-      context.beginPath();
+      // tutorgo: fillRect на точку, а не один путь из тысяч rect. Ускоренный
+      // Canvas2D Firefox (gfx.canvas.accelerated) ведёт на GPU только пути
+      // сложностью до gpu-path-complexity (4000). Замер, тяжёлая доска, круговой
+      // пан: путь — 12 fps, fillRect — 25, без узора — 35; Chromium — 60 в обоих.
+      // Кэш узора одним холстом пробовали — хуже везде (полноэкранная копия).
       for (let x = startX; x < endX; x += s) {
         for (let y = startY; y < endY; y += s) {
           if (!coarse && even(x, scrollX) && even(y, scrollY)) {
             continue;
           }
-          context.rect(x - r, y - r, r * 2, r * 2);
+          context.fillRect(x - r, y - r, r * 2, r * 2);
         }
       }
-      context.fill();
     };
     context.fillStyle = BG_DOT_COLOR;
     dots(true);
